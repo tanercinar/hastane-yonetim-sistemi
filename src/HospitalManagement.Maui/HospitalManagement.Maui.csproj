@@ -1,6 +1,17 @@
 <Project Sdk="Microsoft.NET.Sdk.Razor">
 
-    <PropertyGroup>
+    <!-- Non-Windows / Linux CI configuration: Stubs the client shell so CI runner does not require MAUI/WinUI workloads -->
+    <PropertyGroup Condition="!$([MSBuild]::IsOSPlatform('windows')) or '$(SimulateLinux)' == 'true'">
+        <TargetFramework>net10.0</TargetFramework>
+        <OutputType>Library</OutputType>
+        <UseMaui>false</UseMaui>
+        <EnableDefaultItems>false</EnableDefaultItems>
+        <NuGetLockFilePath>$(MSBuildProjectDirectory)\packages.linux.lock.json</NuGetLockFilePath>
+        <NoWarn>$(NoWarn);CS2008</NoWarn>
+    </PropertyGroup>
+
+    <!-- Windows / Local Desktop & Android developer configuration -->
+    <PropertyGroup Condition="$([MSBuild]::IsOSPlatform('windows')) and '$(SimulateLinux)' != 'true'">
         <TargetFramework></TargetFramework>
         <TargetFrameworks>net10.0-windows10.0.19041.0;net10.0-android</TargetFrameworks>
         <OutputType>Exe</OutputType>
@@ -27,7 +38,7 @@
         <TargetPlatformMinVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'windows'">10.0.17763.0</TargetPlatformMinVersion>
     </PropertyGroup>
 
-    <ItemGroup>
+    <ItemGroup Condition="$([MSBuild]::IsOSPlatform('windows')) and '$(SimulateLinux)' != 'true'">
         <!-- App Icon -->
         <MauiIcon Include="Resources\AppIcon\appicon.svg" ForegroundFile="Resources\AppIcon\appiconfg.svg" Color="#006699" />
 
@@ -45,7 +56,7 @@
         <MauiAsset Include="Resources\Raw\**" LogicalName="%(RecursiveDir)%(Filename)%(Extension)" />
     </ItemGroup>
 
-    <ItemGroup>
+    <ItemGroup Condition="$([MSBuild]::IsOSPlatform('windows')) and '$(SimulateLinux)' != 'true'">
         <PackageReference Include="Microsoft.Maui.Controls" />
         <PackageReference Include="Microsoft.AspNetCore.Components.WebView.Maui" />
     </ItemGroup>
