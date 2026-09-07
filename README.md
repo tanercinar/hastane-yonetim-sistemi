@@ -1,6 +1,6 @@
 # Hastane Yönetim Sistemi (Hospital Management System)
 
-[![CI](https://github.com/taner/hastane-yonetim-sistemi/actions/workflows/ci.yml/badge.svg)](https://github.com/taner/hastane-yonetim-sistemi/actions/workflows/ci.yml)
+[![CI](https://github.com/tanercinar/hastane-yonetim-sistemi/actions/workflows/ci.yml/badge.svg)](https://github.com/tanercinar/hastane-yonetim-sistemi/actions/workflows/ci.yml)
 [![.NET 10](https://img.shields.io/badge/.NET-10.0-512BD4?logo=dotnet&logoColor=white)](https://dotnet.microsoft.com/)
 [![Blazor](https://img.shields.io/badge/UI-Blazor%20Web%20%26%20MAUI-512BD4?logo=blazor&logoColor=white)](https://dotnet.microsoft.com/apps/aspnet/web-apps/blazor)
 [![PostgreSQL](https://img.shields.io/badge/Database-PostgreSQL%2018-4169E1?logo=postgresql&logoColor=white)](https://www.postgresql.org/)
@@ -86,7 +86,7 @@ Veritabanı hazırlandığında aşağıdaki roller kullanıma hazır sentetik k
 
 ### 1. Repoyu Klonlayın
 ```powershell
-git clone https://github.com/taner/hastane-yonetim-sistemi.git
+git clone https://github.com/tanercinar/hastane-yonetim-sistemi.git
 cd hastane-yonetim-sistemi
 ```
 
