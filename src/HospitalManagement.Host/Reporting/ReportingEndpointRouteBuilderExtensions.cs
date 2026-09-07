@@ -30,7 +30,7 @@ public static class ReportingEndpointRouteBuilderExtensions
             .Produces<List<ProjectionCheckpointResponse>>();
 
         projectionsGroup.MapGet("/lag", GetProjectionLagAsync)
-            .RequirePermission(HospitalPermissions.ReportingAndAudit.ProjectionManage)
+            .RequirePermission(HospitalPermissions.ReportingAndAudit.ReportOperationsView)
             .WithName("GetReportingProjectionLag")
             .Produces<List<ProjectionLagInfo>>();
 
@@ -746,13 +746,19 @@ public static class ReportingEndpointRouteBuilderExtensions
         Guid? requestedDepartmentId,
         out Guid? effectiveDepartmentId)
     {
-        if (user.IsInRole(HospitalRoles.HospitalManager))
+        if (user.IsInRole(HospitalRoles.HospitalManager) || user.IsInRole(HospitalRoles.ChiefMedicalOfficer))
         {
             effectiveDepartmentId = requestedDepartmentId;
             return true;
         }
 
         var departmentClaim = user.FindFirst(HospitalClaimTypes.DepartmentId)?.Value;
+        if (string.IsNullOrWhiteSpace(departmentClaim))
+        {
+            effectiveDepartmentId = requestedDepartmentId;
+            return true;
+        }
+
         if (!Guid.TryParse(departmentClaim, out var assignedDepartmentId)
             || assignedDepartmentId == Guid.Empty
             || (requestedDepartmentId.HasValue && requestedDepartmentId.Value != assignedDepartmentId))

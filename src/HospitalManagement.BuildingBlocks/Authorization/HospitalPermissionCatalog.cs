@@ -150,7 +150,7 @@ public static class HospitalPermissionCatalog
         new(HospitalPermissions.Interoperability.MockManage, "Interoperability", "MOCK entegrasyon yapılandırmasını ve teknik günlüklerini yönetme",
             [HospitalRoles.SystemAdministrator]),
         new(HospitalPermissions.Interoperability.ClinicalExchange, "Interoperability", "Hasta kapsamı doğrulanmış klinik MOCK veri alışverişini yürütme",
-            [HospitalRoles.ChiefMedicalOfficer]),
+            [HospitalRoles.Doctor, HospitalRoles.ChiefMedicalOfficer]),
         new(HospitalPermissions.Interoperability.FhirExport, "Interoperability", "Hasta düzeyinde FHIR R4 export paketi oluşturma",
             [HospitalRoles.ChiefMedicalOfficer]),
 

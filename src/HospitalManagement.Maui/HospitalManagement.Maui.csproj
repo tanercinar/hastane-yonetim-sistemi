@@ -62,8 +62,8 @@
     </ItemGroup>
 
     <ItemGroup>
-        <ProjectReference Include="..\HospitalManagement.Contracts\HospitalManagement.Contracts.csproj" />
-        <ProjectReference Include="..\HospitalManagement.UI\HospitalManagement.UI.csproj" />
+        <ProjectReference Include="../HospitalManagement.Contracts/HospitalManagement.Contracts.csproj" />
+        <ProjectReference Include="../HospitalManagement.UI/HospitalManagement.UI.csproj" />
     </ItemGroup>
 
 </Project>

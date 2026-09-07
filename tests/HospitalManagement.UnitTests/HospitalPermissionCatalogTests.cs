@@ -9,7 +9,7 @@ public sealed class HospitalPermissionCatalogTests
     [Trait("Roadmap", "F02-G03")]
     public void CatalogContainsAllCanonicalPermissionsWithValidMetadata()
     {
-        Assert.Equal(71, HospitalPermissionCatalog.All.Count);
+        Assert.Equal(73, HospitalPermissionCatalog.All.Count);
 
         foreach (var permission in HospitalPermissionCatalog.All)
         {

@@ -42,7 +42,7 @@ public sealed class MedulaBoundaryIntegrationTests
         await RunAllMigrationsAndSeedAsync(application);
 
         var client = CreateSecureClient(application);
-        var login = await LoginAsync(client, "DEMO-doctor@hospital.invalid", "DEMO-Doc-Pass!1");
+        var login = await LoginAsync(client, "DEMO-admin@hospital.invalid", "DEMO-Admin-Pass!1");
         Assert.Equal(HttpStatusCode.OK, login.StatusCode);
 
         var resp = await client.GetAsync("/api/v1/interoperability/medula/boundaries");
@@ -73,7 +73,7 @@ public sealed class MedulaBoundaryIntegrationTests
         await RunAllMigrationsAndSeedAsync(application);
 
         var client = CreateSecureClient(application);
-        var login = await LoginAsync(client, "DEMO-doctor@hospital.invalid", "DEMO-Doc-Pass!1");
+        var login = await LoginAsync(client, "DEMO-admin@hospital.invalid", "DEMO-Admin-Pass!1");
         Assert.Equal(HttpStatusCode.OK, login.StatusCode);
 
         var request = new MedulaDemoOperationRequest
@@ -106,7 +106,7 @@ public sealed class MedulaBoundaryIntegrationTests
         await RunAllMigrationsAndSeedAsync(application);
 
         var client = CreateSecureClient(application);
-        var login = await LoginAsync(client, "DEMO-doctor@hospital.invalid", "DEMO-Doc-Pass!1");
+        var login = await LoginAsync(client, "DEMO-admin@hospital.invalid", "DEMO-Admin-Pass!1");
         Assert.Equal(HttpStatusCode.OK, login.StatusCode);
 
         var request = new MedulaOutOfScopeRequest

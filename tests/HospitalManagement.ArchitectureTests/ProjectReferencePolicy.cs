@@ -69,7 +69,8 @@ internal static class RepositoryProjects
             .Where(include => !string.IsNullOrWhiteSpace(include))
             .Select(include =>
             {
-                var referencePath = Path.GetFullPath(Path.Combine(projectDirectory, include!));
+                var normalizedInclude = include!.Replace('\\', '/');
+                var referencePath = Path.GetFullPath(Path.Combine(projectDirectory, normalizedInclude));
                 return new ProjectReferenceDefinition(
                     Path.GetFileNameWithoutExtension(referencePath),
                     referencePath);

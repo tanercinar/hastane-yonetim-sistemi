@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Json;
 using HospitalManagement.Contracts.Identity;
 using HospitalManagement.Contracts.Interoperability;
+using HospitalManagement.Host.Authorization;
 using HospitalManagement.IntegrationTests.Infrastructure;
 using HospitalManagement.Modules.AuditPrivacy.Infrastructure.Persistence;
 using HospitalManagement.Modules.ClinicalRecords.Infrastructure.Persistence;
@@ -134,9 +135,13 @@ public sealed class Hl7V2IntegrationTests
         var docLogin = await LoginAsync(doctorClient, "DEMO-doctor@hospital.invalid", "DEMO-Doc-Pass!1");
         Assert.Equal(HttpStatusCode.OK, docLogin.StatusCode);
 
+        var patientId = Guid.Parse("00000000-0000-0000-0000-000000000109");
+        var doctorId = Guid.Parse("00000000-0000-0000-0000-000000000102");
+        EstablishCareRelationship(application, doctorId, patientId);
+
         var genReq = new Hl7GenerateRequest
         {
-            PatientId = Guid.NewGuid(),
+            PatientId = patientId,
             ProtocolNumber = "PROTO-GEN-999",
             WardName = "Genel Cerrahi",
             BedNumber = "GC-301",
@@ -245,5 +250,15 @@ public sealed class Hl7V2IntegrationTests
 
         var orgSeeder = sp.GetRequiredService<IOrganizationDataSeeder>();
         await orgSeeder.SeedAsync();
+    }
+
+    private static void EstablishCareRelationship(
+        WebApplicationFactory<Program> application,
+        Guid clinicianId,
+        Guid patientId)
+    {
+        using var scope = application.Services.CreateScope();
+        scope.ServiceProvider.GetRequiredService<CareRelationshipRegistry>()
+            .EstablishCareRelationship(clinicianId, patientId);
     }
 }

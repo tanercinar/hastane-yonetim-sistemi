@@ -43,13 +43,13 @@ public sealed class ReportingIntegrationTests
 
         await RunAllMigrationsAndSeedAsync(application);
 
-        var doctorClient = CreateSecureClient(application);
-        var docLogin = await LoginAsync(doctorClient, "DEMO-doctor@hospital.invalid", "DEMO-Doc-Pass!1");
-        Assert.Equal(HttpStatusCode.OK, docLogin.StatusCode);
+        var adminClient = CreateSecureClient(application);
+        var adminLogin = await LoginAsync(adminClient, "DEMO-admin@hospital.invalid", "DEMO-Admin-Pass!1");
+        Assert.Equal(HttpStatusCode.OK, adminLogin.StatusCode);
 
         // 1. Rebuild projections
         var rebuildReq = new RebuildProjectionsRequest();
-        var rebuildResp = await PostWithAntiforgeryAsync(doctorClient, "/api/v1/reporting/projections/rebuild", rebuildReq);
+        var rebuildResp = await PostWithAntiforgeryAsync(adminClient, "/api/v1/reporting/projections/rebuild", rebuildReq);
         Assert.Equal(HttpStatusCode.OK, rebuildResp.StatusCode);
 
         var rebuildSummary = await rebuildResp.Content.ReadFromJsonAsync<RebuildProjectionsResponse>();
@@ -58,7 +58,7 @@ public sealed class ReportingIntegrationTests
         Assert.Equal(4, rebuildSummary.TotalProjectionsRebuilt);
 
         // 2. Query checkpoints
-        var checkpointsResp = await doctorClient.GetAsync("/api/v1/reporting/projections/checkpoints");
+        var checkpointsResp = await adminClient.GetAsync("/api/v1/reporting/projections/checkpoints");
         Assert.Equal(HttpStatusCode.OK, checkpointsResp.StatusCode);
 
         var checkpoints = await checkpointsResp.Content.ReadFromJsonAsync<List<ProjectionCheckpointResponse>>();
@@ -89,6 +89,7 @@ public sealed class ReportingIntegrationTests
         var deptId = Guid.NewGuid();
         var date = new DateOnly(2026, 9, 4);
         var now = DateTime.UtcNow;
+        var doctorPersonId = Guid.Parse("00000000-0000-0000-0000-000000000102");
 
         // Project event via scoped engine
         using (var scope = application.Services.CreateScope())
@@ -100,8 +101,8 @@ public sealed class ReportingIntegrationTests
                 date,
                 deptId,
                 "Kardiyoloji",
-                null,
-                null,
+                doctorPersonId,
+                "Dr. Demo",
                 "None",
                 "Scheduled",
                 now));
@@ -114,8 +115,8 @@ public sealed class ReportingIntegrationTests
                 date,
                 deptId,
                 "Kardiyoloji",
-                null,
-                null,
+                doctorPersonId,
+                "Dr. Demo",
                 "None",
                 "Scheduled",
                 now));

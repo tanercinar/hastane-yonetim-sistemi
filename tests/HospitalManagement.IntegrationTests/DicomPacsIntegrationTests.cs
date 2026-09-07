@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Json;
 using HospitalManagement.Contracts.Identity;
 using HospitalManagement.Contracts.Interoperability;
+using HospitalManagement.Host.Authorization;
 using HospitalManagement.IntegrationTests.Infrastructure;
 using HospitalManagement.Modules.AuditPrivacy.Infrastructure.Persistence;
 using HospitalManagement.Modules.ClinicalRecords.Infrastructure.Persistence;
@@ -41,19 +42,19 @@ public sealed class DicomPacsIntegrationTests
 
         await RunAllMigrationsAndSeedAsync(application);
 
-        var doctorClient = CreateSecureClient(application);
-        var docLogin = await LoginAsync(doctorClient, "DEMO-doctor@hospital.invalid", "DEMO-Doc-Pass!1");
-        Assert.Equal(HttpStatusCode.OK, docLogin.StatusCode);
+        var radtechClient = CreateSecureClient(application);
+        var radLogin = await LoginAsync(radtechClient, "DEMO-radtech@hospital.invalid", "DEMO-RadTech-Pass!1");
+        Assert.Equal(HttpStatusCode.OK, radLogin.StatusCode);
 
         // 1. Query all MWL items
-        var allResp = await doctorClient.GetAsync("/api/v1/interoperability/dicom/worklist");
+        var allResp = await radtechClient.GetAsync("/api/v1/interoperability/dicom/worklist");
         Assert.Equal(HttpStatusCode.OK, allResp.StatusCode);
         var allItems = await allResp.Content.ReadFromJsonAsync<List<DicomWorklistItemResponse>>();
         Assert.NotNull(allItems);
         Assert.NotEmpty(allItems);
 
         // 2. Query filtered by CT
-        var ctResp = await doctorClient.GetAsync("/api/v1/interoperability/dicom/worklist?modality=CT");
+        var ctResp = await radtechClient.GetAsync("/api/v1/interoperability/dicom/worklist?modality=CT");
         Assert.Equal(HttpStatusCode.OK, ctResp.StatusCode);
         var ctItems = await ctResp.Content.ReadFromJsonAsync<List<DicomWorklistItemResponse>>();
         Assert.NotNull(ctItems);
@@ -79,6 +80,8 @@ public sealed class DicomPacsIntegrationTests
         Assert.Equal(HttpStatusCode.OK, docLogin.StatusCode);
 
         var patId = Guid.Parse("00000000-0000-0000-0000-000000000121");
+        var doctorId = Guid.Parse("00000000-0000-0000-0000-000000000102");
+        EstablishCareRelationship(application, doctorId, patId);
 
         // 1. Create MWL Order
         var orderReq = new CreateDicomWorklistOrderRequest
@@ -97,8 +100,12 @@ public sealed class DicomPacsIntegrationTests
         Assert.Equal("Scheduled", created.Status);
         Assert.NotEmpty(created.StudyInstanceUid);
 
-        // 2. Query Study Metadata
-        var studyResp = await doctorClient.GetAsync($"/api/v1/interoperability/dicom/studies/{created.StudyInstanceUid}");
+        // 2. Query Study Metadata (RadiologyStaff)
+        var radtechClient = CreateSecureClient(application);
+        var radLogin = await LoginAsync(radtechClient, "DEMO-radtech@hospital.invalid", "DEMO-RadTech-Pass!1");
+        Assert.Equal(HttpStatusCode.OK, radLogin.StatusCode);
+
+        var studyResp = await radtechClient.GetAsync($"/api/v1/interoperability/dicom/studies/{created.StudyInstanceUid}");
         Assert.Equal(HttpStatusCode.OK, studyResp.StatusCode);
         var study = await studyResp.Content.ReadFromJsonAsync<DicomStudyMetadataResponse>();
         Assert.NotNull(study);
@@ -139,11 +146,15 @@ public sealed class DicomPacsIntegrationTests
         var updateResp = await PutWithAntiforgeryAsync(adminClient, "/api/v1/interoperability/mock-engine/configs/DicomPacs", updateReq);
         Assert.Equal(HttpStatusCode.OK, updateResp.StatusCode);
 
-        // 2. Query MWL -> Should Fail with 500 or error
-        var queryResp = await adminClient.GetAsync("/api/v1/interoperability/dicom/worklist");
+        // 2. Query MWL as RadiologyStaff -> Should Fail with 500 or error due to Offline mock engine
+        var radtechClient = CreateSecureClient(application);
+        var radLogin = await LoginAsync(radtechClient, "DEMO-radtech@hospital.invalid", "DEMO-RadTech-Pass!1");
+        Assert.Equal(HttpStatusCode.OK, radLogin.StatusCode);
+
+        var queryResp = await radtechClient.GetAsync("/api/v1/interoperability/dicom/worklist");
         Assert.True(queryResp.StatusCode == HttpStatusCode.InternalServerError || !queryResp.IsSuccessStatusCode);
 
-        // 3. Reset Circuit Breaker
+        // 3. Reset Circuit Breaker (admin)
         var resetResp = await PostWithAntiforgeryAsync<object?>(adminClient, "/api/v1/interoperability/mock-engine/reset-circuit/DicomPacs", null);
         Assert.Equal(HttpStatusCode.NoContent, resetResp.StatusCode);
     }
@@ -258,5 +269,15 @@ public sealed class DicomPacsIntegrationTests
 
         var orgSeeder = sp.GetRequiredService<IOrganizationDataSeeder>();
         await orgSeeder.SeedAsync();
+    }
+
+    private static void EstablishCareRelationship(
+        WebApplicationFactory<Program> application,
+        Guid clinicianId,
+        Guid patientId)
+    {
+        using var scope = application.Services.CreateScope();
+        scope.ServiceProvider.GetRequiredService<CareRelationshipRegistry>()
+            .EstablishCareRelationship(clinicianId, patientId);
     }
 }

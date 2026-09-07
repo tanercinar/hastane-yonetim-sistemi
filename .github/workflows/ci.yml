@@ -62,6 +62,7 @@ jobs:
           --no-restore
           --collect:"XPlat Code Coverage"
           --results-directory ./artifacts/test-results
+          -m:1
 
       - name: Upload test and coverage reports
         if: ${{ always() }}

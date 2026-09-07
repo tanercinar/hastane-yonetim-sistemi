@@ -26,8 +26,9 @@ public static class AttachmentSecurityValidator
             return "attachment.bin";
         }
 
-        // Strip path traversal attempts and extract plain filename
-        var fileName = Path.GetFileName(rawFileName.Trim());
+        // Strip path traversal attempts and extract plain filename (cross-platform normalization)
+        var normalized = rawFileName.Trim().Replace('\\', '/');
+        var fileName = Path.GetFileName(normalized);
 
         // Remove dangerous characters (null bytes, quotes, path separators)
         var invalidChars = Path.GetInvalidFileNameChars()

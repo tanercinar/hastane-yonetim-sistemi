@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Json;
 using HospitalManagement.Contracts.Identity;
 using HospitalManagement.Contracts.Interoperability;
+using HospitalManagement.Host.Authorization;
 using HospitalManagement.IntegrationTests.Infrastructure;
 using HospitalManagement.Modules.AuditPrivacy.Infrastructure.Persistence;
 using HospitalManagement.Modules.ClinicalRecords.Infrastructure.Persistence;
@@ -46,11 +47,15 @@ public sealed class ENabizIntegrationTests
         var docLogin = await LoginAsync(doctorClient, "DEMO-doctor@hospital.invalid", "DEMO-Doc-Pass!1");
         Assert.Equal(HttpStatusCode.OK, docLogin.StatusCode);
 
+        var patientId = Guid.NewGuid();
+        var doctorId = Guid.Parse("00000000-0000-0000-0000-000000000102");
+        EstablishCareRelationship(application, doctorId, patientId);
+
         // 1. Enqueue
         var enqueueReq = new EnqueueENabizPackageRequest
         {
             PackageType = 101,
-            PatientId = Guid.NewGuid(),
+            PatientId = patientId,
             PatientNationalId = "11111111110",
             HasPatientConsent = true,
             PayloadSummary = "DEMO hasta kayıt paketi",
@@ -103,11 +108,15 @@ public sealed class ENabizIntegrationTests
         var docLogin = await LoginAsync(doctorClient, "DEMO-doctor@hospital.invalid", "DEMO-Doc-Pass!1");
         Assert.Equal(HttpStatusCode.OK, docLogin.StatusCode);
 
+        var patientId = Guid.NewGuid();
+        var doctorId = Guid.Parse("00000000-0000-0000-0000-000000000102");
+        EstablishCareRelationship(application, doctorId, patientId);
+
         // 1. Enqueue without consent
         var enqueueReq = new EnqueueENabizPackageRequest
         {
             PackageType = 105,
-            PatientId = Guid.NewGuid(),
+            PatientId = patientId,
             PatientNationalId = "11111111110",
             HasPatientConsent = false,
             PayloadSummary = "DEMO reçete paketi — rıza yok",
@@ -148,6 +157,8 @@ public sealed class ENabizIntegrationTests
         Assert.Equal(HttpStatusCode.OK, docLogin.StatusCode);
 
         var patientId = Guid.NewGuid();
+        var doctorId = Guid.Parse("00000000-0000-0000-0000-000000000102");
+        EstablishCareRelationship(application, doctorId, patientId);
 
         // Create 2 packages — 1 consented, 1 denied
         var req1 = new EnqueueENabizPackageRequest
@@ -281,5 +292,15 @@ public sealed class ENabizIntegrationTests
 
         var orgSeeder = sp.GetRequiredService<IOrganizationDataSeeder>();
         await orgSeeder.SeedAsync();
+    }
+
+    private static void EstablishCareRelationship(
+        WebApplicationFactory<Program> application,
+        Guid clinicianId,
+        Guid patientId)
+    {
+        using var scope = application.Services.CreateScope();
+        scope.ServiceProvider.GetRequiredService<CareRelationshipRegistry>()
+            .EstablishCareRelationship(clinicianId, patientId);
     }
 }
