@@ -1,0 +1,84 @@
+@page "/account"
+@page "/account/profile"
+@inject UserSessionState SessionState
+@inject NavigationManager Navigation
+
+<PageTitle>DEMO Hesabım</PageTitle>
+
+<section class="account-shell" aria-labelledby="account-heading">
+    <header class="account-shell__heading">
+        <span class="page-eyebrow">Güvenli Oturum</span>
+        <h1 id="account-heading">Hesabım</h1>
+    </header>
+
+    @if (_isLoading)
+    {
+        <p role="status" style="padding:1.5rem; text-align:center; color:#64748b;">Oturum doğrulanıyor…</p>
+    }
+    else if (!SessionState.IsAuthenticated)
+    {
+        <div style="background:#fef2f2; border:1px solid #fecaca; border-radius:0.5rem; padding:1.25rem; text-align:center;">
+            <p class="account-message account-message--error" role="alert" style="margin:0 0 1rem 0;">Aktif bir kullanıcı oturumu bulunamadı.</p>
+            <a class="ui-button ui-button--primary" href="account/login">Giriş Yap</a>
+        </div>
+    }
+    else
+    {
+        <dl class="account-summary" style="margin-bottom:1.5rem;">
+            <div>
+                <dt>DEMO E-posta</dt>
+                <dd><strong>@SessionState.Email</strong></dd>
+            </div>
+            <div>
+                <dt>Rol & Yetki Seviyesi</dt>
+                <dd>
+                    <span class="ui-badge" style="background:#e0f2fe; color:#0369a1; font-weight:600;">
+                        @SessionState.GetRoleDisplayName()
+                    </span>
+                    @if (SessionState.Roles.Count > 1)
+                    {
+                        <span style="font-size:0.8rem; color:#64748b; margin-left:0.5rem;">(@string.Join(", ", SessionState.Roles))</span>
+                    }
+                </dd>
+            </div>
+            <div>
+                <dt>Hesap Türü</dt>
+                <dd>@SessionState.AccountKind</dd>
+            </div>
+            <div>
+                <dt>Kişi / Person ID</dt>
+                <dd><code>@(SessionState.PersonId ?? "Atanmamış")</code></dd>
+            </div>
+            <div>
+                <dt>İki Faktörlü Doğrulama (2FA)</dt>
+                <dd>@(SessionState.CurrentAccount?.TwoFactorEnabled == true ? "Aktif (MFA)" : "Pasif")</dd>
+            </div>
+        </dl>
+
+        <div style="display:flex; gap:0.75rem; flex-wrap:wrap;">
+            <button class="ui-button ui-button--primary" type="button" @onclick="GoToDashboard">Çalışma Alanıma Git</button>
+            <button class="ui-button ui-button--secondary" type="button" @onclick="LogoutAsync">Çıkış yap</button>
+        </div>
+    }
+</section>
+
+@code {
+    private bool _isLoading = true;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await SessionState.EnsureLoadedAsync();
+        _isLoading = false;
+    }
+
+    private void GoToDashboard()
+    {
+        Navigation.NavigateTo(SessionState.GetHomeRouteForCurrentRole());
+    }
+
+    private async Task LogoutAsync()
+    {
+        await SessionState.LogoutAsync();
+        Navigation.NavigateTo("account/login");
+    }
+}

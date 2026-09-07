@@ -1,0 +1,191 @@
+using System.Net;
+using System.Net.Http.Json;
+using HospitalManagement.Contracts.Identity;
+using HospitalManagement.Contracts.Inpatient;
+using HospitalManagement.IntegrationTests.Infrastructure;
+using HospitalManagement.Modules.AuditPrivacy.Infrastructure.Persistence;
+using HospitalManagement.Modules.ClinicalRecords.Infrastructure.Persistence;
+using HospitalManagement.Modules.Diagnostics.Application;
+using HospitalManagement.Modules.Diagnostics.Infrastructure.Persistence;
+using HospitalManagement.Modules.IdentityAccess.Application;
+using HospitalManagement.Modules.IdentityAccess.Infrastructure.Persistence;
+using HospitalManagement.Modules.Inpatient.Application;
+using HospitalManagement.Modules.Inpatient.Infrastructure.Persistence;
+using HospitalManagement.Modules.Notifications.Infrastructure.Persistence;
+using HospitalManagement.Modules.Organization.Infrastructure.Persistence;
+using HospitalManagement.Modules.Patients.Infrastructure.Persistence;
+using HospitalManagement.Modules.Pharmacy.Infrastructure.Persistence;
+using HospitalManagement.Modules.Scheduling.Infrastructure.Persistence;
+using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
+using Xunit;
+
+namespace HospitalManagement.IntegrationTests;
+
+public sealed class BedManagementIntegrationTests
+{
+    [Fact]
+    [Trait("Category", "Integration")]
+    [Trait("Roadmap", "F07-G01")]
+    public async Task BedManagementReturnsSeededWardsAllowsBedStatusTransitionsAndAuditLogging()
+    {
+        await using var database = await PostgreSqlTestDatabase.StartAsync();
+        var messages = new InMemoryIdentityMessageSender();
+
+        using var application = new ApiWebApplicationFactory(
+            database.ConnectionString,
+            identityMessageSender: messages);
+
+        await RunAllMigrationsAndSeedAsync(application);
+
+        // 1. Login as Nurse
+        var nurseClient = CreateSecureClient(application);
+        var loginResponse = await LoginAsync(nurseClient, "DEMO-nurse@hospital.invalid", "DEMO-Nurse-Pass!1");
+        Assert.Equal(HttpStatusCode.OK, loginResponse.StatusCode);
+
+        // 2. Fetch Wards
+        var wardsResponse = await nurseClient.GetAsync("/api/v1/inpatient/wards");
+        Assert.Equal(HttpStatusCode.OK, wardsResponse.StatusCode);
+        var wards = await wardsResponse.Content.ReadFromJsonAsync<List<WardResponse>>();
+        Assert.NotNull(wards);
+        Assert.NotEmpty(wards);
+        Assert.Contains(wards, w => w.Code == "DEMO-WRD-CARD");
+
+        var cardWard = wards.Single(w => w.Code == "DEMO-WRD-CARD");
+
+        // 3. Fetch Rooms and Beds for Cardiology Ward
+        var roomsResponse = await nurseClient.GetAsync($"/api/v1/inpatient/wards/{cardWard.Id}/rooms");
+        Assert.Equal(HttpStatusCode.OK, roomsResponse.StatusCode);
+        var rooms = await roomsResponse.Content.ReadFromJsonAsync<List<RoomResponse>>();
+        Assert.NotNull(rooms);
+        Assert.NotEmpty(rooms);
+
+        var room301 = rooms.Single(r => r.RoomNumber == "301");
+        var bed301A = room301.Beds.Single(b => b.BedNumber == "301-A");
+        Assert.Equal("Available", bed301A.Status);
+
+        // 4. Put bed under maintenance
+        var maintenanceReq = new UpdateBedStatusRequest
+        {
+            NewStatus = "Maintenance",
+            Reason = "Mekanik arıza onarımı",
+        };
+        var maintenanceResponse = await PostWithAntiforgeryAsync(nurseClient, $"/api/v1/inpatient/beds/{bed301A.Id}/status", maintenanceReq);
+        Assert.Equal(HttpStatusCode.OK, maintenanceResponse.StatusCode);
+
+        var updatedBed = await maintenanceResponse.Content.ReadFromJsonAsync<BedResponse>();
+        Assert.NotNull(updatedBed);
+        Assert.Equal("Maintenance", updatedBed.Status);
+        Assert.Equal("Mekanik arıza onarımı", updatedBed.MaintenanceReason);
+
+        // 5. Restore bed from maintenance to available
+        var restoreReq = new UpdateBedStatusRequest
+        {
+            NewStatus = "Available",
+        };
+        var restoreResponse = await PostWithAntiforgeryAsync(nurseClient, $"/api/v1/inpatient/beds/{bed301A.Id}/status", restoreReq);
+        Assert.Equal(HttpStatusCode.OK, restoreResponse.StatusCode);
+
+        var restoredBed = await restoreResponse.Content.ReadFromJsonAsync<BedResponse>();
+        Assert.NotNull(restoredBed);
+        Assert.Equal("Available", restoredBed.Status);
+        Assert.Null(restoredBed.MaintenanceReason);
+
+        // 6. Verify Occupancy Summary
+        var summaryResponse = await nurseClient.GetAsync("/api/v1/inpatient/occupancy-summary");
+        Assert.Equal(HttpStatusCode.OK, summaryResponse.StatusCode);
+        var summary = await summaryResponse.Content.ReadFromJsonAsync<BedOccupancySummaryResponse>();
+        Assert.NotNull(summary);
+        Assert.True(summary.TotalBeds > 0);
+        Assert.True(summary.AvailableBeds > 0);
+
+        // 7. Verify Audit Events
+        await using var scope = application.Services.CreateAsyncScope();
+        var auditDb = scope.ServiceProvider.GetRequiredService<AuditPrivacyDbContext>();
+        var auditLogs = await auditDb.AuditLogs
+            .Where(a => a.TargetResourceId == bed301A.Id.ToString())
+            .ToListAsync();
+
+        Assert.NotEmpty(auditLogs);
+        Assert.Contains(auditLogs, a => a.Action == "Inpatient.BedMaintenance");
+        Assert.Contains(auditLogs, a => a.Action == "Inpatient.BedMaintenanceRestore");
+    }
+
+    private static HttpClient CreateSecureClient(ApiWebApplicationFactory application) =>
+        application.CreateClient(new WebApplicationFactoryClientOptions
+        {
+            BaseAddress = new Uri("https://localhost", UriKind.Absolute),
+            AllowAutoRedirect = false,
+            HandleCookies = true,
+        });
+
+    private static Task<HttpResponseMessage> LoginAsync(
+        HttpClient client,
+        string email,
+        string password) =>
+        PostWithAntiforgeryAsync(
+            client,
+            "/api/v1/identity/sessions",
+            new LoginRequest { Email = email, Password = password });
+
+    private static async Task<HttpResponseMessage> PostWithAntiforgeryAsync<TRequest>(
+        HttpClient client,
+        string requestUri,
+        TRequest body)
+    {
+        var token = await client.GetFromJsonAsync<AntiforgeryTokenResponse>(
+            "/api/v1/identity/antiforgery");
+        Assert.NotNull(token);
+        using var request = new HttpRequestMessage(HttpMethod.Post, requestUri)
+        {
+            Content = body is null ? null : JsonContent.Create(body),
+        };
+        request.Headers.Add("X-HMS-CSRF", token.Token);
+        return await client.SendAsync(request);
+    }
+
+    private static async Task RunAllMigrationsAndSeedAsync(ApiWebApplicationFactory application)
+    {
+        await using var scope = application.Services.CreateAsyncScope();
+
+        var identityDb = scope.ServiceProvider.GetRequiredService<IdentityAccessDbContext>();
+        await identityDb.Database.MigrateAsync();
+
+        var auditDb = scope.ServiceProvider.GetRequiredService<AuditPrivacyDbContext>();
+        await auditDb.Database.MigrateAsync();
+
+        var orgDb = scope.ServiceProvider.GetRequiredService<OrganizationDbContext>();
+        await orgDb.Database.MigrateAsync();
+
+        var patientsDb = scope.ServiceProvider.GetRequiredService<PatientsDbContext>();
+        await patientsDb.Database.MigrateAsync();
+
+        var schedulingDb = scope.ServiceProvider.GetRequiredService<SchedulingDbContext>();
+        await schedulingDb.Database.MigrateAsync();
+
+        var notificationsDb = scope.ServiceProvider.GetRequiredService<NotificationsDbContext>();
+        await notificationsDb.Database.MigrateAsync();
+
+        var clinicalDb = scope.ServiceProvider.GetRequiredService<ClinicalRecordsDbContext>();
+        await clinicalDb.Database.MigrateAsync();
+
+        var pharmacyDb = scope.ServiceProvider.GetRequiredService<PharmacyDbContext>();
+        await pharmacyDb.Database.MigrateAsync();
+
+        var diagnosticsDb = scope.ServiceProvider.GetRequiredService<DiagnosticsDbContext>();
+        await diagnosticsDb.Database.MigrateAsync();
+
+        var inpatientDb = scope.ServiceProvider.GetRequiredService<InpatientDbContext>();
+        await inpatientDb.Database.MigrateAsync();
+
+        var orgSeeder = scope.ServiceProvider.GetRequiredService<IOrganizationDataSeeder>();
+        await orgSeeder.SeedAsync();
+
+        var identitySeeder = scope.ServiceProvider.GetRequiredService<IIdentityDataSeeder>();
+        await identitySeeder.SeedAsync();
+
+        var inpatientSeeder = scope.ServiceProvider.GetRequiredService<IInpatientDataSeeder>();
+        await inpatientSeeder.SeedAsync();
+    }
+}

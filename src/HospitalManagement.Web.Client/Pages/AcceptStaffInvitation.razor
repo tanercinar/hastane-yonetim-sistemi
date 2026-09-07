@@ -1,0 +1,76 @@
+@page "/account/accept-staff-invitation"
+@inject IdentityApiClient Identity
+
+<PageTitle>DEMO personel davetini kabul et</PageTitle>
+
+<section class="account-shell" aria-labelledby="staff-invitation-heading">
+    <header class="account-shell__heading">
+        <span class="page-eyebrow">Yönetici daveti</span>
+        <h1 id="staff-invitation-heading">Personel hesabını etkinleştir</h1>
+        <p>Personel hesabı self-registration ile açılamaz; yalnız yönetici tarafından üretilen davet kabul edilir.</p>
+    </header>
+    <EditForm Model="_model" OnValidSubmit="SubmitAsync" class="account-form">
+        <DataAnnotationsValidator />
+        <ValidationSummary />
+        <label for="staff-email">DEMO e-posta</label>
+        <InputText id="staff-email" @bind-Value="_model.Email" autocomplete="email" />
+        <label for="staff-code">Davet kodu</label>
+        <InputText id="staff-code" @bind-Value="_model.Code" autocomplete="one-time-code" />
+        <label for="staff-password">Parola</label>
+        <InputText id="staff-password" @bind-Value="_model.Password" type="password" autocomplete="new-password" />
+        <button class="ui-button ui-button--primary" type="submit" disabled="@_isSubmitting">
+            @(_isSubmitting ? "Etkinleştiriliyor…" : "Daveti kabul et")
+        </button>
+    </EditForm>
+    @if (_message is not null)
+    {
+        <p class="account-message @(_succeeded ? "account-message--success" : "account-message--error")"
+           role="@(_succeeded ? "status" : "alert")">@_message</p>
+    }
+    <nav class="account-links" aria-label="Hesap işlemleri">
+        <a href="account/login">Giriş yap</a>
+    </nav>
+</section>
+
+@code {
+    private readonly StaffInvitationModel _model = new();
+    private bool _isSubmitting;
+    private bool _succeeded;
+    private string? _message;
+
+    private async Task SubmitAsync()
+    {
+        _isSubmitting = true;
+        try
+        {
+            var result = await Identity.AcceptStaffInvitationAsync(new AcceptStaffInvitationRequest
+            {
+                Email = _model.Email,
+                Code = _model.Code,
+                Password = _model.Password,
+            });
+            _succeeded = result.Succeeded;
+            _message = result.Message;
+        }
+        finally
+        {
+            _model.Code = string.Empty;
+            _model.Password = string.Empty;
+            _isSubmitting = false;
+        }
+    }
+
+    private sealed class StaffInvitationModel
+    {
+        [Required(ErrorMessage = "E-posta zorunludur.")]
+        [EmailAddress(ErrorMessage = "Geçerli bir e-posta girin.")]
+        public string Email { get; set; } = string.Empty;
+
+        [Required(ErrorMessage = "Davet kodu zorunludur.")]
+        public string Code { get; set; } = string.Empty;
+
+        [Required(ErrorMessage = "Parola zorunludur.")]
+        [StringLength(128, MinimumLength = 12, ErrorMessage = "Parola en az 12 karakter olmalıdır.")]
+        public string Password { get; set; } = string.Empty;
+    }
+}

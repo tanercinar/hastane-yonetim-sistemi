@@ -1,0 +1,139 @@
+@page "/notifications"
+@inject INotificationApiClient NotificationApi
+@inject UserSessionState SessionState
+@inject NavigationManager Navigation
+
+<PageTitle>Bildirimlerim — Hastane Yönetim Sistemi</PageTitle>
+
+<header class="page-heading" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: var(--hys-space-3);">
+    <div>
+        <span class="page-eyebrow">İletişim ve Bilgilendirme</span>
+        <h1 class="page-title">Bildirimlerim</h1>
+        <p class="page-subtitle">Randevu onayları, iptalleri ve poliklinik sıra güncellemelerinizi buradan takip edin.</p>
+    </div>
+    <button class="ui-button ui-button--secondary" type="button" @onclick="LoadNotificationsAsync">Yenile</button>
+</header>
+
+@if (_isLoading)
+{
+    <LoadingState />
+}
+else if (_isForbidden)
+{
+    <ForbiddenState ActionText="Giriş Yap" ActionHref="/account/login" />
+}
+else if (_notifications is null || _notifications.Count == 0)
+{
+    <EmptyState Title="Bildiriminiz Bulunmuyor" Description="Şu an için tarafınıza iletilmiş herhangi bir bildirim bulunmamaktadır." />
+}
+else
+{
+    <div style="display: flex; flex-direction: column; gap: var(--hys-space-3);">
+        @if (!string.IsNullOrWhiteSpace(_statusMessage))
+        {
+            <div class="ui-state ui-state--success" role="status" style="padding: var(--hys-space-3); border-radius: var(--hys-radius-md); background: #dcfce7; color: #166534;">
+                @_statusMessage
+            </div>
+        }
+
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--hys-space-2);">
+            <span style="font-size: 0.875rem; color: var(--hys-color-muted);">
+                Toplam <strong>@_notifications.Count</strong> bildirim (<strong>@_notifications.Count(n => !n.IsRead)</strong> okunmamış)
+            </span>
+        </div>
+
+        @foreach (var notif in _notifications)
+        {
+            <div class="ui-panel" style="background: @(notif.IsRead ? "var(--hys-color-surface)" : "rgba(37, 99, 235, 0.04)"); border: 1px solid @(notif.IsRead ? "var(--hys-color-border)" : "var(--hys-color-primary)"); border-radius: var(--hys-radius-lg); padding: var(--hys-space-4); display: flex; flex-direction: column; gap: var(--hys-space-2);">
+                <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: var(--hys-space-3);">
+                    <div style="display: flex; align-items: center; gap: var(--hys-space-2);">
+                        @if (!notif.IsRead)
+                        {
+                            <span style="width: 8px; height: 8px; border-radius: 50%; background: var(--hys-color-primary); display: inline-block;"></span>
+                        }
+                        <h3 style="margin: 0; font-size: 1rem; font-weight: 600;">@notif.Title</h3>
+                    </div>
+                    <span style="font-size: 0.75rem; color: var(--hys-color-muted); white-space: nowrap;">
+                        @notif.CreatedAtUtc.ToLocalTime().ToString("dd.MM.yyyy HH:mm")
+                    </span>
+                </div>
+
+                <p style="margin: 0; font-size: 0.875rem; color: var(--hys-color-text); line-height: 1.5;">
+                    @notif.Message
+                </p>
+
+                <div style="display: flex; justify-content: flex-end; gap: var(--hys-space-2); margin-top: var(--hys-space-2);">
+                    @if (!notif.IsRead)
+                    {
+                        <button class="ui-button ui-button--secondary notification-mark-read-btn" type="button" style="padding: var(--hys-space-1) var(--hys-space-3); font-size: 0.75rem;"
+                                @onclick="() => MarkAsReadAsync(notif.Id)">
+                            Okundu İşaretle
+                        </button>
+                    }
+                    else
+                    {
+                        <span style="font-size: 0.75rem; color: var(--hys-color-muted);">✓ Okundu</span>
+                    }
+                </div>
+            </div>
+        }
+    </div>
+}
+
+@code {
+    private IReadOnlyList<NotificationDetailResponse>? _notifications;
+    private bool _isLoading = true;
+    private bool _isForbidden;
+    private string? _statusMessage;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await SessionState.EnsureLoadedAsync();
+        if (!SessionState.IsAuthenticated)
+        {
+            Navigation.NavigateTo("account/login");
+            return;
+        }
+        await LoadNotificationsAsync();
+    }
+
+    private async Task LoadNotificationsAsync()
+    {
+        _isLoading = true;
+        _isForbidden = false;
+        _statusMessage = null;
+
+        try
+        {
+            _notifications = await NotificationApi.GetMyNotificationsAsync();
+            if (_notifications is null)
+            {
+                _isForbidden = true;
+            }
+        }
+        catch
+        {
+            _isForbidden = true;
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+    }
+
+    private async Task MarkAsReadAsync(Guid notificationId)
+    {
+        try
+        {
+            var success = await NotificationApi.MarkAsReadAsync(notificationId);
+            if (success)
+            {
+                await LoadNotificationsAsync();
+            }
+        }
+        catch
+        {
+            // Silently retain current state on error
+        }
+    }
+}

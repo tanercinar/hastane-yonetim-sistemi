@@ -1,0 +1,6 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <Description>Public API and client contracts; domain entities do not cross this boundary.</Description>
+  </PropertyGroup>
+</Project>
+

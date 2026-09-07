@@ -1,0 +1,25 @@
+---
+description: Hastane projesinin roadmap, güvenlik, veri ve test sözleşmesi
+alwaysApply: true
+---
+
+# Proje Çalışma Kuralı
+
+1. Önce [`ROADMAP.md`](../../ROADMAP.md), `AGENTS.md`, `docs/product/glossary.md` ve hedefle ilgili ADR'yi oku.
+2. Görev belirtilmediyse bağımlılıkları bitmiş ilk `[ ]` görevi seç; açık toplu izin yoksa yalnız bir görev yap.
+3. `ROADMAP.md` tek kalıcı görev/status kaynağıdır; araç-özel plan/task/walkthrough çıktıları repoda ikinci checklist'e dönüşmez.
+4. Kabul ölçütü, otomatik test ve gerekli manuel kontrol bitmeden görevi `[x]` yapma.
+5. Sonunda roadmap aktif görevini, kutuyu ve test kanıtlı ilerleme günlüğünü güncelle.
+
+## Değişmezler
+
+- Yalnız sentetik `DEMO` veri; gerçek hasta/kimlik verisi, secret ve gerçek kurum credential'ı yasak.
+- Yetki API'de `Permission + Resource Scope + Care Relationship` ile uygulanır.
+- İmzalı/final klinik kayıt silent update veya hard delete görmez.
+- Modül başka modülün Infrastructure, DbContext veya tablosuna doğrudan erişmez.
+- UI iş kuralı içermez; istemciler kararlı API contract kullanır.
+- Mock entegrasyon `MOCK` etiketlidir ve gerçek endpoint'e çıkmaz.
+- Klinik içerik/token/secret log, telemetry, URL veya exception içine girmez.
+- Finans, satın alma, bordro ve tam İK mevcut kapsam dışıdır.
+
+Test kapsamı için `docs/testing/test-strategy.md`; yetki için `docs/security/authorization-matrix.md`; veri için `docs/privacy/`; ajan devri için `docs/agents/antigravity.md` kaynaklarını kullan.

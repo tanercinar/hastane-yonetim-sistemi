@@ -1,0 +1,332 @@
+@page "/inpatient/board"
+@using HospitalManagement.Contracts.Inpatient
+@using HospitalManagement.Web.Client.Inpatient
+@inject IInpatientApiClient InpatientApi
+@inject NavigationManager Navigation
+
+<div class="container-fluid py-3">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <div>
+            <h2 class="fw-bold mb-0">Yatan Hasta Klinik Panosu</h2>
+            <p class="text-muted mb-0">Klinik bakım ekibi için servis bazlı hasta listesi, risk göstergeleri ve klinik durum özeti.</p>
+        </div>
+        <div class="d-flex gap-2">
+            <button class="btn btn-outline-primary" @onclick="RefreshDataAsync">
+                <i class="bi bi-arrow-clockwise me-1"></i> Yenile
+            </button>
+        </div>
+    </div>
+
+    @if (!string.IsNullOrWhiteSpace(_errorMessage))
+    {
+        <div class="alert alert-danger alert-dismissible fade show" role="alert">
+            <i class="bi bi-exclamation-triangle-fill me-2"></i>@_errorMessage
+            <button type="button" class="btn-close" @onclick="() => _errorMessage = null"></button>
+        </div>
+    }
+
+    <!-- Üst İstatistik Kartları -->
+    <div class="row g-3 mb-4">
+        <div class="col-6 col-md-3">
+            <div class="card shadow-sm border-0 bg-primary text-white">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <div>
+                            <div class="small text-white-50 text-uppercase fw-semibold">Yatan Hasta</div>
+                            <div class="fs-3 fw-bold">@_boardItems.Count</div>
+                        </div>
+                        <i class="bi bi-people-fill fs-1 text-white-50"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-6 col-md-3">
+            <div class="card shadow-sm border-0 bg-danger text-white">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <div>
+                            <div class="small text-white-50 text-uppercase fw-semibold">Yüksek Düşme Riski</div>
+                            <div class="fs-3 fw-bold">@_boardItems.Count(i => i.FallRiskLevel == "High")</div>
+                        </div>
+                        <i class="bi bi-exclamation-octagon-fill fs-1 text-white-50"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-6 col-md-3">
+            <div class="card shadow-sm border-0 bg-warning text-dark">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <div>
+                            <div class="small text-dark-50 text-uppercase fw-semibold">İzolasyonlu Hasta</div>
+                            <div class="fs-3 fw-bold">@_boardItems.Count(i => i.IsolationRequired != "None")</div>
+                        </div>
+                        <i class="bi bi-shield-exclamation fs-1 text-dark-50"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-6 col-md-3">
+            <div class="card shadow-sm border-0 bg-info text-white">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <div>
+                            <div class="small text-white-50 text-uppercase fw-semibold">Transfer Bekleyen</div>
+                            <div class="fs-3 fw-bold">@_boardItems.Count(i => i.HasPendingTransfer)</div>
+                        </div>
+                        <i class="bi bi-arrow-left-right fs-1 text-white-50"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Filtreler -->
+    <div class="card shadow-sm border-0 mb-4">
+        <div class="card-body">
+            <div class="row g-3 align-items-center">
+                <div class="col-md-4">
+                    <label class="form-label small fw-semibold">Servis Filtresi</label>
+                    <select class="form-select" @bind="_selectedWardId" @bind:after="RefreshDataAsync">
+                        <option value="">Tüm Servisler</option>
+                        @foreach (var w in _wards)
+                        {
+                            <option value="@w.Id">@w.Name (@w.Building - @w.Floor)</option>
+                        }
+                    </select>
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label small fw-semibold">Düşme Riski Seviyesi</label>
+                    <select class="form-select" @bind="_selectedRiskLevel" @bind:after="RefreshDataAsync">
+                        <option value="">Tüm Seviyeler</option>
+                        <option value="High">Yüksek Risk (>=50)</option>
+                        <option value="Medium">Orta Risk (25-49)</option>
+                        <option value="Low">Düşük Risk (&lt; 25)</option>
+                    </select>
+                </div>
+                <div class="col-md-3">
+                    <div class="form-check form-switch mt-4">
+                        <input class="form-check-input" type="checkbox" id="isolationSwitch" @bind="_isolationOnly" @bind:after="RefreshDataAsync">
+                        <label class="form-check-label fw-semibold" for="isolationSwitch">Yalnızca İzolasyonlu Hastalar</label>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    @if (_isLoading)
+    {
+        <div class="text-center py-5">
+            <div class="spinner-border text-primary" role="status">
+                <span class="visually-hidden">Yükleniyor...</span>
+            </div>
+            <p class="text-muted mt-2">Klinik pano verileri alınıyor...</p>
+        </div>
+    }
+    else if (_boardItems.Count == 0)
+    {
+        <div class="alert alert-info">Seçilen kriterlere uygun yatan hasta bulunmamaktadır.</div>
+    }
+    else
+    {
+        <div class="row g-3">
+            @foreach (var item in _boardItems)
+            {
+                <div class="col-md-6 col-xl-4">
+                    <div class="card h-100 shadow-sm border-0 border-start border-4 @GetCardBorderClass(item)">
+                        <div class="card-header bg-white d-flex justify-content-between align-items-center py-2">
+                            <div>
+                                <span class="badge bg-dark me-1"><i class="bi bi-door-open me-1"></i>Oda @(item.RoomNumber ?? "-")</span>
+                                <span class="badge bg-primary"><i class="bi bi-hospital me-1"></i>Yatak @item.BedNumber</span>
+                            </div>
+                            <span class="badge bg-light text-secondary border">@item.WardName</span>
+                        </div>
+                        <div class="card-body">
+                            <div class="d-flex justify-content-between align-items-start mb-2">
+                                <div>
+                                    <h5 class="fw-bold mb-0 text-primary">@item.PatientFullName</h5>
+                                    <small class="text-muted font-monospace">@item.PatientIdentifier</small>
+                                </div>
+                                <span class="badge bg-secondary">@item.DaysInHospital. Günü</span>
+                            </div>
+
+                            <div class="mb-2">
+                                <small class="text-muted d-block">Tanı / Yatış Nedeni:</small>
+                                <div class="fw-semibold small text-truncate" title="@item.DiagnosisDescription">
+                                    <span class="badge bg-secondary me-1">@item.DiagnosisCode</span> @item.DiagnosisDescription
+                                </div>
+                            </div>
+
+                            <div class="mb-3 small">
+                                <div><i class="bi bi-person-badge me-1 text-muted"></i><strong>Hekim:</strong> @item.AttendingDoctorName</div>
+                                <div><i class="bi bi-cup-hot me-1 text-muted"></i><strong>Diyet:</strong> @item.DietType</div>
+                            </div>
+
+                            <!-- Uyarı & Risk Rozetleri -->
+                            <div class="d-flex flex-wrap gap-1 mb-3">
+                                @if (item.FallRiskLevel == "High")
+                                {
+                                    <span class="badge bg-danger"><i class="bi bi-exclamation-triangle me-1"></i>Yüksek Düşme Riski (@item.FallRiskScore)</span>
+                                }
+                                else if (item.FallRiskLevel == "Medium")
+                                {
+                                    <span class="badge bg-warning text-dark"><i class="bi bi-exclamation-circle me-1"></i>Orta Düşme Riski (@item.FallRiskScore)</span>
+                                }
+                                else
+                                {
+                                    <span class="badge bg-success"><i class="bi bi-shield-check me-1"></i>Düşük Düşme Riski</span>
+                                }
+
+                                @if (item.IsolationRequired != "None")
+                                {
+                                    <span class="badge bg-danger"><i class="bi bi-shield-slash me-1"></i>İzolasyon: @item.IsolationRequired</span>
+                                }
+
+                                @if (item.HasPendingTransfer)
+                                {
+                                    <span class="badge bg-info text-dark"><i class="bi bi-arrow-left-right me-1"></i>Transfer Sürecinde</span>
+                                }
+                            </div>
+                        </div>
+                        <div class="card-footer bg-white border-top-0 pt-0 d-flex justify-content-between gap-1">
+                            <button class="btn btn-outline-primary btn-sm flex-fill" @onclick="() => OpenSummaryModal(item)">
+                                <i class="bi bi-card-checklist me-1"></i> Klinik Özet
+                            </button>
+                            <a href="inpatient/transfers" class="btn btn-outline-secondary btn-sm" title="Transfer İşlemi">
+                                <i class="bi bi-arrow-left-right"></i>
+                            </a>
+                        </div>
+                    </div>
+                </div>
+            }
+        </div>
+    }
+</div>
+
+<!-- Modal: Hasta Klinik Özeti -->
+@if (_showSummaryModal && _selectedSummaryItem != null)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content border-0 shadow">
+                <div class="modal-header bg-primary text-white">
+                    <h5 class="modal-title"><i class="bi bi-card-checklist me-2"></i>Klinik Hasta Özeti</h5>
+                    <button type="button" class="btn-close btn-close-white" @onclick="() => _showSummaryModal = false"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="d-flex justify-content-between align-items-center mb-3 pb-2 border-bottom">
+                        <div>
+                            <h5 class="fw-bold mb-0">@_selectedSummaryItem.PatientFullName</h5>
+                            <small class="text-muted">@_selectedSummaryItem.PatientIdentifier</small>
+                        </div>
+                        <span class="badge bg-primary fs-6">Yatak @_selectedSummaryItem.BedNumber</span>
+                    </div>
+
+                    <div class="row g-2 mb-3 small">
+                        <div class="col-6"><strong>Servis:</strong> @_selectedSummaryItem.WardName</div>
+                        <div class="col-6"><strong>Oda:</strong> @(_selectedSummaryItem.RoomNumber ?? "-")</div>
+                        <div class="col-6"><strong>Sorumlu Hekim:</strong> @_selectedSummaryItem.AttendingDoctorName</div>
+                        <div class="col-6"><strong>Diyet:</strong> @_selectedSummaryItem.DietType</div>
+                        <div class="col-6"><strong>Yatış Tarihi:</strong> @_selectedSummaryItem.AdmittedAtUtc.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</div>
+                        <div class="col-6"><strong>Yatış Süresi:</strong> @_selectedSummaryItem.DaysInHospital gün</div>
+                    </div>
+
+                    <div class="alert alert-light border mb-3">
+                        <div class="fw-bold small text-muted">Tanı & Klinik Tablo:</div>
+                        <div class="fw-semibold">[@_selectedSummaryItem.DiagnosisCode] @_selectedSummaryItem.DiagnosisDescription</div>
+                    </div>
+
+                    <div class="d-flex flex-column gap-2">
+                        <div class="d-flex justify-content-between align-items-center p-2 rounded bg-light border">
+                            <span><i class="bi bi-exclamation-triangle me-2 text-danger"></i>Düşme Riski Skoru:</span>
+                            <span class="fw-bold">@_selectedSummaryItem.FallRiskScore (@_selectedSummaryItem.FallRiskLevel)</span>
+                        </div>
+                        <div class="d-flex justify-content-between align-items-center p-2 rounded bg-light border">
+                            <span><i class="bi bi-shield-slash me-2 text-warning"></i>İzolasyon Gereksinimi:</span>
+                            <span class="fw-bold">@_selectedSummaryItem.IsolationRequired</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" @onclick="() => _showSummaryModal = false">Kapat</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private bool _isLoading = true;
+    private string? _errorMessage;
+
+    private List<WardResponse> _wards = [];
+    private List<InpatientBoardItemResponse> _boardItems = [];
+
+    private string _selectedWardId = "";
+    private string _selectedRiskLevel = "";
+    private bool _isolationOnly;
+
+    // Modal
+    private bool _showSummaryModal;
+    private InpatientBoardItemResponse? _selectedSummaryItem;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadWardsAsync();
+        await RefreshDataAsync();
+    }
+
+    private async Task LoadWardsAsync()
+    {
+        try
+        {
+            _wards = await InpatientApi.GetWardsAsync();
+        }
+        catch
+        {
+            _wards = [];
+        }
+    }
+
+    private async Task RefreshDataAsync()
+    {
+        _isLoading = true;
+        _errorMessage = null;
+        try
+        {
+            Guid? wardFilter = Guid.TryParse(_selectedWardId, out var wid) ? wid : null;
+            _boardItems = await InpatientApi.GetInpatientBoardAsync(
+                wardId: wardFilter,
+                riskLevel: string.IsNullOrWhiteSpace(_selectedRiskLevel) ? null : _selectedRiskLevel,
+                isolationOnly: _isolationOnly ? true : null);
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"Pano verileri yüklenirken hata oluştu: {ex.Message}";
+        }
+        finally
+        {
+            _isLoading = false;
+            StateHasChanged();
+        }
+    }
+
+    private void OpenSummaryModal(InpatientBoardItemResponse item)
+    {
+        _selectedSummaryItem = item;
+        _showSummaryModal = true;
+    }
+
+    private static string GetCardBorderClass(InpatientBoardItemResponse item)
+    {
+        if (item.IsolationRequired != "None" || item.FallRiskLevel == "High")
+        {
+            return "border-danger";
+        }
+        if (item.HasPendingTransfer || item.FallRiskLevel == "Medium")
+        {
+            return "border-warning";
+        }
+        return "border-primary";
+    }
+}

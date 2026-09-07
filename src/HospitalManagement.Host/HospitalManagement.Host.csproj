@@ -1,0 +1,44 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <PropertyGroup>
+    <BlazorDisableThrowNavigationException>true</BlazorDisableThrowNavigationException>
+    <Description>ASP.NET Core composition root for API, authentication, SignalR, and module endpoints.</Description>
+    <UserSecretsId>4d13895d-e6b8-4ddf-b31d-0c6ce04d3ce4</UserSecretsId>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly.Server" />
+    <PackageReference Include="Microsoft.AspNetCore.OpenApi" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <PackageReference Include="Microsoft.Extensions.Compliance.Redaction" />
+    <PackageReference Include="Microsoft.Extensions.Telemetry" />
+    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" />
+    <PackageReference Include="OpenTelemetry.Exporter.Console" />
+    <PackageReference Include="OpenTelemetry.Extensions.Hosting" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../HospitalManagement.BuildingBlocks/HospitalManagement.BuildingBlocks.csproj" />
+    <ProjectReference Include="../HospitalManagement.Contracts/HospitalManagement.Contracts.csproj" />
+    <ProjectReference Include="../HospitalManagement.UI/HospitalManagement.UI.csproj" />
+    <ProjectReference Include="../HospitalManagement.Web.Client/HospitalManagement.Web.Client.csproj" />
+    <ProjectReference Include="../Modules/AuditPrivacy/HospitalManagement.Modules.AuditPrivacy.csproj" />
+    <ProjectReference Include="../Modules/ClinicalRecords/HospitalManagement.Modules.ClinicalRecords.csproj" />
+    <ProjectReference Include="../Modules/Diagnostics/HospitalManagement.Modules.Diagnostics.csproj" />
+    <ProjectReference Include="../Modules/Emergency/HospitalManagement.Modules.Emergency.csproj" />
+    <ProjectReference Include="../Modules/IdentityAccess/HospitalManagement.Modules.IdentityAccess.csproj" />
+    <ProjectReference Include="../Modules/Inpatient/HospitalManagement.Modules.Inpatient.csproj" />
+    <ProjectReference Include="../Modules/Interoperability/HospitalManagement.Modules.Interoperability.csproj" />
+    <ProjectReference Include="../Modules/Inventory/HospitalManagement.Modules.Inventory.csproj" />
+    <ProjectReference Include="../Modules/Notifications/HospitalManagement.Modules.Notifications.csproj" />
+    <ProjectReference Include="../Modules/Organization/HospitalManagement.Modules.Organization.csproj" />
+    <ProjectReference Include="../Modules/Patients/HospitalManagement.Modules.Patients.csproj" />
+    <ProjectReference Include="../Modules/Pharmacy/HospitalManagement.Modules.Pharmacy.csproj" />
+    <ProjectReference Include="../Modules/Reporting/HospitalManagement.Modules.Reporting.csproj" />
+    <ProjectReference Include="../Modules/Scheduling/HospitalManagement.Modules.Scheduling.csproj" />
+    <ProjectReference Include="../Modules/SpecialtyCare/HospitalManagement.Modules.SpecialtyCare.csproj" />
+    <ProjectReference Include="../Modules/SurgeryCriticalCare/HospitalManagement.Modules.SurgeryCriticalCare.csproj" />
+  </ItemGroup>
+</Project>

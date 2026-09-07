@@ -1,0 +1,390 @@
+@page "/diagnostics/critical-notifications"
+@using HospitalManagement.Contracts.Diagnostics
+@using HospitalManagement.Contracts.Realtime
+@using HospitalManagement.Web.Client.Diagnostics
+@using Microsoft.AspNetCore.SignalR.Client
+@implements IAsyncDisposable
+@inject IDiagnosticsApiClient DiagnosticsApi
+@inject NavigationManager Navigation
+
+<div class="container-fluid px-4 py-3" data-testid="critical-notifications-page">
+    <!-- Header -->
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <div>
+            <h4 class="mb-0 text-danger fw-bold">
+                <i class="bi bi-exclamation-triangle-fill text-danger me-2"></i>Kritik Sonuç Bildirimleri ve Eskalasyon
+            </h4>
+            <p class="text-muted small mb-0">Panik / kritik değer bildirimleri, hekim alındı teyidi ve eskalasyon simülasyonu</p>
+        </div>
+        <button class="btn btn-outline-danger btn-sm" @onclick="LoadNotificationsAsync">
+            <i class="bi bi-arrow-clockwise me-1"></i>Yenile
+        </button>
+    </div>
+
+    <!-- Demo Banner -->
+    <div class="alert alert-warning py-2 px-3 d-flex align-items-center mb-3 small shadow-sm" role="alert">
+        <i class="bi bi-shield-exclamation me-2 fs-5"></i>
+        <div>
+            <strong>EĞİTİM VE DEMO AMAÇLIDIR:</strong> Bu ekrandaki kritik değer bildirimleri ve eskalasyon zinciri sentetik verilerle simüle edilir. Gerçek SMS/çağrı cihazı entegrasyonu içermez.
+        </div>
+    </div>
+
+    @if (!string.IsNullOrWhiteSpace(_errorMessage))
+    {
+        <div class="alert alert-danger alert-dismissible fade show py-2 small" role="alert">
+            <i class="bi bi-exclamation-circle me-1"></i>@_errorMessage
+            <button type="button" class="btn-close btn-sm" @onclick="() => _errorMessage = null"></button>
+        </div>
+    }
+
+    @if (!string.IsNullOrWhiteSpace(_successMessage))
+    {
+        <div class="alert alert-success alert-dismissible fade show py-2 small" role="alert">
+            <i class="bi bi-check-circle me-1"></i>@_successMessage
+            <button type="button" class="btn-close btn-sm" @onclick="() => _successMessage = null"></button>
+        </div>
+    }
+
+    <!-- Notifications List -->
+    <div class="card shadow-sm border-0">
+        <div class="card-header bg-white border-bottom py-3 d-flex justify-content-between align-items-center">
+            <h6 class="mb-0 fw-bold text-dark">
+                <i class="bi bi-bell-fill text-danger me-1"></i>Aktif Kritik Bildirimler
+                @if (_notifications.Count > 0)
+                {
+                    <span class="badge bg-danger ms-2">@_notifications.Count</span>
+                }
+            </h6>
+        </div>
+        <div class="card-body p-0">
+            @if (_isLoading)
+            {
+                <div class="text-center py-5 text-muted">
+                    <div class="spinner-border spinner-border-sm text-danger me-2" role="status"></div>
+                    <span>Kritik bildirimler yükleniyor...</span>
+                </div>
+            }
+            else if (_notifications.Count == 0)
+            {
+                <div class="text-center py-5 text-muted">
+                    <i class="bi bi-check-circle fs-2 d-block mb-2 text-success"></i>
+                    <span>Şu anda bekleyen aktif kritik sonuç bildirimi bulunmamaktadır.</span>
+                </div>
+            }
+            else
+            {
+                <div class="table-responsive">
+                    <table class="table table-hover align-middle mb-0">
+                        <thead class="table-danger small">
+                            <tr>
+                                <th>Bildirim Zamanı</th>
+                                <th>Hasta ID</th>
+                                <th>Test & Parametre</th>
+                                <th>Kritik Değer</th>
+                                <th>Durum & Seviye</th>
+                                <th class="text-end">İşlemler</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var item in _notifications)
+                            {
+                                <tr>
+                                    <td class="small">
+                                        <strong class="text-dark">@item.CreatedAtUtc.ToLocalTime().ToString("HH:mm:ss")</strong>
+                                        <small class="d-block text-muted">@item.CreatedAtUtc.ToLocalTime().ToString("dd.MM.yyyy")</small>
+                                    </td>
+                                    <td>
+                                        <span class="font-monospace small text-dark">@item.PatientId.ToString().Substring(0, 8)...</span>
+                                    </td>
+                                    <td>
+                                        <strong class="text-dark">@item.ParameterName</strong>
+                                        <small class="d-block text-muted">Kod: @item.ParameterCode</small>
+                                    </td>
+                                    <td>
+                                        <span class="badge bg-danger text-white fs-6 py-1 px-2">
+                                            @(item.NumericValue?.ToString() ?? item.StringValue ?? "-") @item.Unit
+                                        </span>
+                                        <small class="d-block text-danger fw-bold mt-1">@GetFlagText(item.Flag)</small>
+                                    </td>
+                                    <td>
+                                        <span class="badge @GetStatusBadgeClass(item.Status)">@GetStatusText(item.Status)</span>
+                                        @if (item.EscalationLevel > 1)
+                                        {
+                                            <span class="badge bg-warning text-dark ms-1">Eskalasyon Seviyesi @item.EscalationLevel</span>
+                                        }
+                                        @if (!string.IsNullOrWhiteSpace(item.EscalationReason))
+                                        {
+                                            <small class="d-block text-muted mt-1">Gerekçe: @item.EscalationReason</small>
+                                        }
+                                    </td>
+                                    <td class="text-end">
+                                        <button class="btn btn-sm btn-success me-1" @onclick="() => OpenAcknowledgeModal(item)">
+                                            <i class="bi bi-check2-circle me-1"></i>Alındı Teyidi
+                                        </button>
+                                        <button class="btn btn-sm btn-outline-warning text-dark" @onclick="() => OpenEscalateModal(item)">
+                                            <i class="bi bi-arrow-up-circle me-1"></i>Eskale Et
+                                        </button>
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </div>
+    </div>
+</div>
+
+<!-- Acknowledge Modal -->
+@if (_showAcknowledgeModal && _selectedNotification != null)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);" role="dialog">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content shadow border-0">
+                <div class="modal-header bg-success text-white">
+                    <h6 class="modal-title fw-bold"><i class="bi bi-check2-circle me-2"></i>Kritik Değer Alındı Teyidi</h6>
+                    <button type="button" class="btn-close btn-close-white" @onclick="() => _showAcknowledgeModal = false"></button>
+                </div>
+                <div class="modal-body p-4">
+                    <p class="small text-muted mb-2">
+                        <strong>@_selectedNotification.ParameterName</strong> için 
+                        <span class="text-danger fw-bold">@(_selectedNotification.NumericValue?.ToString() ?? _selectedNotification.StringValue) @_selectedNotification.Unit</span> 
+                        değerini teslim aldığınızı ve klinik sürece dahil ettiğinizi onaylayın.
+                    </p>
+
+                    <div class="mb-3">
+                        <label class="form-label small fw-bold text-dark">Alındı & Eylem Notu <span class="text-danger">*</span></label>
+                        <textarea class="form-control" rows="3" @bind="_acknowledgmentNotes"
+                                  placeholder="Örn: Değer hekim tarafından sözlü/telefonla alındı, hastaya acil insülin/tedavi protokolü uygulandı."></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer bg-light">
+                    <button type="button" class="btn btn-sm btn-secondary" @onclick="() => _showAcknowledgeModal = false">Vazgeç</button>
+                    <button type="button" class="btn btn-sm btn-success" @onclick="SubmitAcknowledgeAsync" disabled="@(_isSubmitting || string.IsNullOrWhiteSpace(_acknowledgmentNotes))">
+                        <i class="bi bi-check2 me-1"></i>Alındı Teyidini Kaydet
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+<!-- Escalate Modal -->
+@if (_showEscalateModal && _selectedNotification != null)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);" role="dialog">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content shadow border-0">
+                <div class="modal-header bg-warning text-dark">
+                    <h6 class="modal-title fw-bold"><i class="bi bi-arrow-up-circle-fill me-2"></i>Kritik Değer Eskalasyonu</h6>
+                    <button type="button" class="btn-close" @onclick="() => _showEscalateModal = false"></button>
+                </div>
+                <div class="modal-body p-4">
+                    <p class="small text-muted mb-2">
+                        Birincil hekime ulaşılamadığı veya acil yanıt alınamadığı durumda bildirim bir üst kademeye (Klinik Sorumlusu / Nöbetçi Uzman / Başhekimlik) eskale edilir.
+                    </p>
+
+                    <div class="mb-3">
+                        <label class="form-label small fw-bold text-dark">Eskalasyon Gerekçesi <span class="text-danger">*</span></label>
+                        <textarea class="form-control" rows="3" @bind="_escalationReason"
+                                  placeholder="Örn: Birincil hekime 15 dakika boyunca ulaşılamadı; servis sorumlu hekimine eskale edildi."></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer bg-light">
+                    <button type="button" class="btn btn-sm btn-secondary" @onclick="() => _showEscalateModal = false">Vazgeç</button>
+                    <button type="button" class="btn btn-sm btn-warning text-dark" @onclick="SubmitEscalateAsync" disabled="@(_isSubmitting || string.IsNullOrWhiteSpace(_escalationReason))">
+                        <i class="bi bi-arrow-up-circle me-1"></i>Eskalasyonu Başlat
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private List<CriticalResultNotificationResponse> _notifications = [];
+    private CriticalResultNotificationResponse? _selectedNotification;
+
+    private string? _acknowledgmentNotes;
+    private string? _escalationReason;
+
+    private bool _isLoading;
+    private bool _isSubmitting;
+    private bool _showAcknowledgeModal;
+    private bool _showEscalateModal;
+
+    private string? _errorMessage;
+    private string? _successMessage;
+    private HubConnection? _hubConnection;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadNotificationsAsync();
+        _ = StartRealtimeConnectionAsync();
+    }
+
+    private async Task StartRealtimeConnectionAsync()
+    {
+        try
+        {
+            _hubConnection = new HubConnectionBuilder()
+                .WithUrl(Navigation.ToAbsoluteUri("/hubs/hospital"))
+                .WithAutomaticReconnect()
+                .Build();
+
+            _hubConnection.On<CriticalResultRealtimeUpdate>("CriticalResultChanged", async _ =>
+            {
+                await InvokeAsync(LoadNotificationsAsync);
+                await InvokeAsync(StateHasChanged);
+            });
+
+            _hubConnection.Reconnected += async _ =>
+            {
+                await InvokeAsync(LoadNotificationsAsync);
+                await InvokeAsync(StateHasChanged);
+            };
+
+            await _hubConnection.StartAsync();
+        }
+        catch
+        {
+            // Bağlantı kurulamazsa ekran REST ile yenilenmeye devam eder.
+        }
+    }
+
+    private async Task LoadNotificationsAsync()
+    {
+        _isLoading = true;
+        _errorMessage = null;
+
+        try
+        {
+            _notifications = await DiagnosticsApi.GetActiveCriticalNotificationsAsync();
+        }
+        catch
+        {
+            _errorMessage = "Kritik bildirimler şu anda yüklenemedi. Lütfen yeniden deneyin.";
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+    }
+
+    private void OpenAcknowledgeModal(CriticalResultNotificationResponse item)
+    {
+        _selectedNotification = item;
+        _acknowledgmentNotes = string.Empty;
+        _showAcknowledgeModal = true;
+    }
+
+    private void OpenEscalateModal(CriticalResultNotificationResponse item)
+    {
+        _selectedNotification = item;
+        _escalationReason = string.Empty;
+        _showEscalateModal = true;
+    }
+
+    private async Task SubmitAcknowledgeAsync()
+    {
+        if (_selectedNotification == null || string.IsNullOrWhiteSpace(_acknowledgmentNotes)) return;
+        _isSubmitting = true;
+        _errorMessage = null;
+
+        try
+        {
+            var req = new AcknowledgeCriticalResultRequest
+            {
+                AcknowledgmentNotes = _acknowledgmentNotes.Trim(),
+            };
+
+            var updated = await DiagnosticsApi.AcknowledgeCriticalNotificationAsync(_selectedNotification.Id, req);
+            if (updated != null)
+            {
+                _showAcknowledgeModal = false;
+                _successMessage = "Kritik değer alındı teyidi başarıyla kaydedildi.";
+                await LoadNotificationsAsync();
+            }
+            else
+            {
+                _errorMessage = "Alındı teyidi kaydedilemedi.";
+            }
+        }
+        catch
+        {
+            _errorMessage = "Alındı teyidi kaydedilemedi. Lütfen yeniden deneyin.";
+        }
+        finally
+        {
+            _isSubmitting = false;
+        }
+    }
+
+    private async Task SubmitEscalateAsync()
+    {
+        if (_selectedNotification == null || string.IsNullOrWhiteSpace(_escalationReason)) return;
+        _isSubmitting = true;
+        _errorMessage = null;
+
+        try
+        {
+            var req = new EscalateCriticalResultRequest
+            {
+                EscalationReason = _escalationReason.Trim(),
+            };
+
+            var updated = await DiagnosticsApi.EscalateCriticalNotificationAsync(_selectedNotification.Id, req);
+            if (updated != null)
+            {
+                _showEscalateModal = false;
+                _successMessage = "Kritik bildirim başarıyla eskale edildi.";
+                await LoadNotificationsAsync();
+            }
+            else
+            {
+                _errorMessage = "Eskalasyon işlemi gerçekleştirilemedi.";
+            }
+        }
+        catch
+        {
+            _errorMessage = "Eskalasyon işlemi gerçekleştirilemedi. Lütfen yeniden deneyin.";
+        }
+        finally
+        {
+            _isSubmitting = false;
+        }
+    }
+
+    private static string GetStatusBadgeClass(string status) => status switch
+    {
+        "Active" => "bg-danger text-white",
+        "Acknowledged" => "bg-success text-white",
+        "Escalated" => "bg-warning text-dark",
+        "Closed" => "bg-secondary text-white",
+        _ => "bg-light text-dark",
+    };
+
+    private static string GetStatusText(string status) => status switch
+    {
+        "Active" => "Aktif Bekliyor",
+        "Acknowledged" => "Alındı Teyitli",
+        "Escalated" => "Eskale Edildi",
+        "Closed" => "Kapatıldı",
+        _ => status,
+    };
+
+    private static string GetFlagText(string flag) => flag switch
+    {
+        "CriticalLow" => "KRİTİK DÜŞÜK (PANİK DEĞER)",
+        "CriticalHigh" => "KRİTİK YÜKSEK (PANİK DEĞER)",
+        _ => flag,
+    };
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_hubConnection is not null)
+        {
+            await _hubConnection.DisposeAsync();
+        }
+    }
+}

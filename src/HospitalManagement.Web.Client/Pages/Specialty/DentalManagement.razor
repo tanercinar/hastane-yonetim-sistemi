@@ -1,0 +1,728 @@
+@page "/specialty/dental"
+@using HospitalManagement.Contracts.Specialty
+@using HospitalManagement.Web.Client.Specialty
+@using Microsoft.AspNetCore.Authorization
+@attribute [Authorize]
+@inject ISpecialtyCareApiClient SpecialtyClient
+
+<PageTitle>Diş Hekimliği ve Odontogram — Hastane Yönetim Sistemi</PageTitle>
+
+<div class="container-fluid px-4 py-3">
+    <!-- Clinical Simulation Disclaimer Banner -->
+    <div class="alert alert-warning border-warning d-flex align-items-center mb-4" role="alert">
+        <i class="bi bi-exclamation-triangle-fill fs-4 me-3 text-warning"></i>
+        <div>
+            <strong>Klinik Simülasyon Bildirimi:</strong> Bu modül eğitim ve yönetim simülasyonu amaçlıdır; sertifikalı diş hekimliği klinik karar desteği niteliği taşımaz. Tanı ve tedavi planı yetkili diş hekiminin sorumluluğundadır.
+        </div>
+    </div>
+
+    <!-- Header & Action Bar -->
+    <div class="d-flex justify-content-between align-items-center mb-4 pb-2 border-bottom">
+        <div>
+            <h2 class="h3 fw-bold text-primary mb-1">Diş Hekimliği ve Odontogram Panosu</h2>
+            <p class="text-muted small mb-0">FDI iki basamaklı diş numaralandırması, odontogram durumu, geçmiş revizyonlar ve tedavi planı.</p>
+        </div>
+        <div class="d-flex gap-2">
+            <button class="btn btn-outline-primary d-flex align-items-center gap-2" @onclick="OpenExamModal">
+                <i class="bi bi-file-earmark-medical"></i>
+                <span>Yeni Muayene</span>
+            </button>
+            <button class="btn btn-primary d-flex align-items-center gap-2" @onclick="OpenPlanProcedureModal">
+                <i class="bi bi-plus-circle"></i>
+                <span>Tedavi / İşlem Planla</span>
+            </button>
+        </div>
+    </div>
+
+    <!-- Patient Selector -->
+    <div class="card shadow-sm mb-4 border-0">
+        <div class="card-body">
+            <div class="row g-3 align-items-end">
+                <div class="col-md-6">
+                    <label class="form-label fw-semibold small">Hasta ID</label>
+                    <div class="input-group">
+                        <input type="text" class="form-control" placeholder="00000000-0000-0000-0000-000000000201" @bind="_searchPatientId" />
+                        <button class="btn btn-primary" type="button" @onclick="LoadPatientDentalData">
+                            <i class="bi bi-search me-1"></i>Sorgula
+                        </button>
+                    </div>
+                </div>
+                <div class="col-md-6 text-end">
+                    <span class="badge bg-light text-dark border p-2 me-2">
+                        Kayıtlı Diş Sayısı: <strong>@_odontogram.Count</strong>
+                    </span>
+                    <span class="badge bg-light text-dark border p-2">
+                        Planlanan Tedavi: <strong>@_procedures.Count(p => p.Status == "Planned")</strong>
+                    </span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    @if (_isLoading)
+    {
+        <div class="text-center py-5">
+            <div class="spinner-border text-primary" role="status">
+                <span class="visually-hidden">Yükleniyor...</span>
+            </div>
+            <p class="text-muted mt-2">Odontogram ve diş kayıtları yükleniyor...</p>
+        </div>
+    }
+    else if (_errorMessage is not null)
+    {
+        <div class="alert alert-danger" role="alert">
+            <i class="bi bi-x-circle me-2"></i>@_errorMessage
+        </div>
+    }
+    else
+    {
+        <!-- ODONTOGRAM CHART (FDI Notation: 18-11, 21-28 / 48-41, 31-38) -->
+        <div class="card shadow-sm border-0 mb-4">
+            <div class="card-header bg-light d-flex justify-content-between align-items-center py-3">
+                <h5 class="fw-bold text-dark mb-0"><i class="bi bi-grid-3x3 me-2"></i>Etkileşimli Odontogram (FDI ISO 3950)</h5>
+                <div class="d-flex gap-2 small">
+                    <span class="badge bg-success">Sağlam</span>
+                    <span class="badge bg-danger">Çürük</span>
+                    <span class="badge bg-primary">Dolgulu</span>
+                    <span class="badge bg-secondary">Eksik/Çekilmiş</span>
+                    <span class="badge bg-warning text-dark">Kuron/Kaplama</span>
+                    <span class="badge bg-info text-dark">Kanal Tedavisi</span>
+                    <span class="badge bg-dark">İmplant</span>
+                </div>
+            </div>
+            <div class="card-body p-4 text-center">
+                <!-- Upper Jaw (Üst Çene) -->
+                <div class="mb-4">
+                    <h6 class="text-muted fw-bold small text-uppercase mb-2">Üst Çene (Maksilla)</h6>
+                    <div class="d-flex justify-content-center gap-1 flex-wrap mb-1" role="region" aria-label="Üst Çene Dişleri">
+                        <!-- Quadrant 1 (18 to 11) -->
+                        <div class="d-flex gap-1 border-end pe-2 me-1">
+                            @foreach (var toothNum in new[] { 18, 17, 16, 15, 14, 13, 12, 11 })
+                            {
+                                var cond = GetToothCondition(toothNum);
+                                <button type="button"
+                                        class="btn btn-sm tooth-btn @GetToothButtonClass(cond?.Condition) @(toothNum == _selectedToothNumber ? "border-3 border-dark fw-bold" : "")"
+                                        aria-label="Diş @toothNum : @(cond?.Condition ?? "Sound")"
+                                        @onclick="() => SelectTooth(toothNum)">
+                                    <span class="d-block small">@toothNum</span>
+                                    <i class="bi @GetToothIcon(cond?.Condition) d-block"></i>
+                                </button>
+                            }
+                        </div>
+                        <!-- Quadrant 2 (21 to 28) -->
+                        <div class="d-flex gap-1 ps-1">
+                            @foreach (var toothNum in new[] { 21, 22, 23, 24, 25, 26, 27, 28 })
+                            {
+                                var cond = GetToothCondition(toothNum);
+                                <button type="button"
+                                        class="btn btn-sm tooth-btn @GetToothButtonClass(cond?.Condition) @(toothNum == _selectedToothNumber ? "border-3 border-dark fw-bold" : "")"
+                                        aria-label="Diş @toothNum : @(cond?.Condition ?? "Sound")"
+                                        @onclick="() => SelectTooth(toothNum)">
+                                    <span class="d-block small">@toothNum</span>
+                                    <i class="bi @GetToothIcon(cond?.Condition) d-block"></i>
+                                </button>
+                            }
+                        </div>
+                    </div>
+                </div>
+
+                <hr class="w-50 mx-auto my-3" />
+
+                <!-- Lower Jaw (Alt Çene) -->
+                <div>
+                    <div class="d-flex justify-content-center gap-1 flex-wrap mb-1" role="region" aria-label="Alt Çene Dişleri">
+                        <!-- Quadrant 4 (48 to 41) -->
+                        <div class="d-flex gap-1 border-end pe-2 me-1">
+                            @foreach (var toothNum in new[] { 48, 47, 46, 45, 44, 43, 42, 41 })
+                            {
+                                var cond = GetToothCondition(toothNum);
+                                <button type="button"
+                                        class="btn btn-sm tooth-btn @GetToothButtonClass(cond?.Condition) @(toothNum == _selectedToothNumber ? "border-3 border-dark fw-bold" : "")"
+                                        aria-label="Diş @toothNum : @(cond?.Condition ?? "Sound")"
+                                        @onclick="() => SelectTooth(toothNum)">
+                                    <i class="bi @GetToothIcon(cond?.Condition) d-block"></i>
+                                    <span class="d-block small">@toothNum</span>
+                                </button>
+                            }
+                        </div>
+                        <!-- Quadrant 3 (31 to 38) -->
+                        <div class="d-flex gap-1 ps-1">
+                            @foreach (var toothNum in new[] { 31, 32, 33, 34, 35, 36, 37, 38 })
+                            {
+                                var cond = GetToothCondition(toothNum);
+                                <button type="button"
+                                        class="btn btn-sm tooth-btn @GetToothButtonClass(cond?.Condition) @(toothNum == _selectedToothNumber ? "border-3 border-dark fw-bold" : "")"
+                                        aria-label="Diş @toothNum : @(cond?.Condition ?? "Sound")"
+                                        @onclick="() => SelectTooth(toothNum)">
+                                    <i class="bi @GetToothIcon(cond?.Condition) d-block"></i>
+                                    <span class="d-block small">@toothNum</span>
+                                </button>
+                            }
+                        </div>
+                    </div>
+                    <h6 class="text-muted fw-bold small text-uppercase mt-2">Alt Çene (Mandibula)</h6>
+                </div>
+            </div>
+        </div>
+
+        <!-- Selected Tooth Detail & History Card -->
+        @if (_selectedToothNumber > 0)
+        {
+            var selectedCond = GetToothCondition(_selectedToothNumber);
+            <div class="card shadow-sm border-0 mb-4 border-start border-4 border-primary">
+                <div class="card-header bg-light d-flex justify-content-between align-items-center py-2">
+                    <h6 class="fw-bold text-dark mb-0">
+                        <i class="bi bi-info-circle me-2"></i>Seçili Diş #@_selectedToothNumber Ayrıntısı ve Geçmişi
+                    </h6>
+                    <button class="btn btn-sm btn-primary" @onclick="() => OpenToothConditionModal(_selectedToothNumber)">
+                        <i class="bi bi-pencil-square me-1"></i>Durum Güncelle / Kaydet
+                    </button>
+                </div>
+                <div class="card-body">
+                    <div class="row g-3">
+                        <div class="col-md-4">
+                            <span class="text-muted small d-block">Mevcut Durum:</span>
+                            <strong class="fs-6">@GetConditionLabel(selectedCond?.Condition ?? "Sound")</strong>
+                            @if (selectedCond?.Notes is not null)
+                            {
+                                <div class="text-muted small mt-1">@selectedCond.Notes</div>
+                            }
+                        </div>
+                        <div class="col-md-8">
+                            <h6 class="fw-bold small text-muted mb-2">Diş Geçmişi / Revizyon Zinciri (@_selectedToothHistory.Count kayıt)</h6>
+                            @if (_selectedToothHistory.Count == 0)
+                            {
+                                <div class="text-muted small fst-italic">Kayıtlı revizyon geçmişi bulunmuyor (Varsayılan Sağlam).</div>
+                            }
+                            else
+                            {
+                                <div class="list-group list-group-flush small">
+                                    @foreach (var h in _selectedToothHistory)
+                                    {
+                                        <div class="list-group-item px-0 py-1 d-flex justify-content-between align-items-center">
+                                            <div>
+                                                <span class="badge @GetToothButtonClass(h.Condition) me-2">v@h.Version: @GetConditionLabel(h.Condition)</span>
+                                                <span class="text-muted">@h.Notes</span>
+                                            </div>
+                                            <span class="text-muted small">@h.RecordedAtUtc.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</span>
+                                        </div>
+                                    }
+                                </div>
+                            }
+                        </div>
+                    </div>
+                </div>
+            </div>
+        }
+
+        <!-- Procedures and Examinations Tabs -->
+        <div class="card shadow-sm border-0">
+            <div class="card-header bg-white pb-0">
+                <ul class="nav nav-tabs card-header-tabs" role="tablist">
+                    <li class="nav-item">
+                        <button class="nav-link @(_activeTab == "procedures" ? "active fw-bold" : "")" @onclick='() => _activeTab = "procedures"'>
+                            <i class="bi bi-tools me-1"></i>Tedavi ve İşlemler (@_procedures.Count)
+                        </button>
+                    </li>
+                    <li class="nav-item">
+                        <button class="nav-link @(_activeTab == "examinations" ? "active fw-bold" : "")" @onclick='() => _activeTab = "examinations"'>
+                            <i class="bi bi-journal-medical me-1"></i>Muayene Kayıtları (@_examinations.Count)
+                        </button>
+                    </li>
+                </ul>
+            </div>
+            <div class="card-body">
+                @if (_activeTab == "procedures")
+                {
+                    @if (_procedures.Count == 0)
+                    {
+                        <div class="text-center py-4 text-muted">
+                            <i class="bi bi-clipboard2-check display-6 d-block mb-2"></i>
+                            Planlanan veya tamamlanan diş tedavisi bulunmuyor.
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="table-responsive">
+                            <table class="table table-hover align-middle mb-0">
+                                <thead class="table-light">
+                                    <tr>
+                                        <th>Protokol</th>
+                                        <th>Diş No</th>
+                                        <th>İşlem Adı</th>
+                                        <th>Kod</th>
+                                        <th>Durum</th>
+                                        <th>Tahmini Ücret</th>
+                                        <th>Tarih</th>
+                                        <th>İşlem</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var proc in _procedures)
+                                    {
+                                        <tr>
+                                            <td class="fw-bold">@proc.ProcedureProtocolNumber</td>
+                                            <td>@(proc.ToothNumber.HasValue ? $"#{proc.ToothNumber.Value}" : "Tüm Ağız")</td>
+                                            <td class="fw-semibold">@proc.ProcedureName</td>
+                                            <td><code>@proc.ProcedureCode</code></td>
+                                            <td>
+                                                @if (proc.Status == "Completed")
+                                                {
+                                                    <span class="badge bg-success">Tamamlandı</span>
+                                                }
+                                                else if (proc.Status == "Planned")
+                                                {
+                                                    <span class="badge bg-warning text-dark">Planlandı</span>
+                                                }
+                                                else
+                                                {
+                                                    <span class="badge bg-secondary">@proc.Status</span>
+                                                }
+                                            </td>
+                                            <td>@proc.EstimatedCost.ToString("N2") ₺</td>
+                                            <td class="small text-muted">@proc.CreatedAtUtc.ToLocalTime().ToString("dd.MM.yyyy")</td>
+                                            <td>
+                                                @if (proc.Status == "Planned")
+                                                {
+                                                    <button class="btn btn-sm btn-outline-success" @onclick="() => CompleteProcedure(proc.Id)">
+                                                        <i class="bi bi-check2 me-1"></i>Tamamla
+                                                    </button>
+                                                }
+                                            </td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    }
+                }
+                else
+                {
+                    @if (_examinations.Count == 0)
+                    {
+                        <div class="text-center py-4 text-muted">
+                            <i class="bi bi-file-earmark-medical display-6 d-block mb-2"></i>
+                            Kayıtlı diş muayenesi bulunmuyor.
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="row g-3">
+                            @foreach (var ex in _examinations)
+                            {
+                                <div class="col-md-6">
+                                    <div class="card bg-light border-0 p-3">
+                                        <div class="d-flex justify-content-between mb-2">
+                                            <span class="badge bg-primary">@ex.ExaminationProtocolNumber</span>
+                                            <span class="text-muted small">@ex.ExaminationDateUtc.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</span>
+                                        </div>
+                                        <div class="small">
+                                            <div><strong>Şikayet:</strong> @(ex.ChiefComplaint ?? "-")</div>
+                                            <div><strong>Tanı / Bulgular:</strong> @(ex.DiagnosisNotes ?? "-")</div>
+                                            <div><strong>Tedavi Planı:</strong> @(ex.TreatmentPlanSummary ?? "-")</div>
+                                        </div>
+                                    </div>
+                                </div>
+                            }
+                        </div>
+                    }
+                }
+            </div>
+        </div>
+    }
+</div>
+
+<!-- Modal: Record Tooth Condition -->
+@if (_showToothModal)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title fw-bold">Diş #@_modalToothNumber Durum Güncelle</h5>
+                    <button type="button" class="btn-close" @onclick="() => _showToothModal = false"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label small fw-semibold">Diş Durumu *</label>
+                        <select class="form-select" @bind="_toothReq.Condition">
+                            <option value="Sound">Sağlam (Sound)</option>
+                            <option value="Caries">Çürük (Caries)</option>
+                            <option value="Filled">Dolgulu (Filled)</option>
+                            <option value="Missing">Eksik / Çekilmiş (Missing)</option>
+                            <option value="Impacted">Gömülü (Impacted)</option>
+                            <option value="Crown">Kuron / Kaplama (Crown)</option>
+                            <option value="RootCanalTreated">Kanal Tedavili (Root Canal)</option>
+                            <option value="Implant">İmplant (Implant)</option>
+                            <option value="DecayedRoot">Kök Kalıntısı (Decayed Root)</option>
+                            <option value="Fractured">Kırık (Fractured)</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label small fw-semibold">Etkilenen Yüzeyler (Toplam Değer: @_toothReq.AffectedSurfaces)</label>
+                        <div class="d-flex gap-2 flex-wrap">
+                            <div class="form-check form-check-inline">
+                                <input class="form-check-input" type="checkbox" id="surfM" checked="@((_toothReq.AffectedSurfaces & 1) != 0)" @onchange="e => ToggleSurface(1, (bool)e.Value!)" />
+                                <label class="form-check-label small" for="surfM">Mesial (M)</label>
+                            </div>
+                            <div class="form-check form-check-inline">
+                                <input class="form-check-input" type="checkbox" id="surfD" checked="@((_toothReq.AffectedSurfaces & 2) != 0)" @onchange="e => ToggleSurface(2, (bool)e.Value!)" />
+                                <label class="form-check-label small" for="surfD">Distal (D)</label>
+                            </div>
+                            <div class="form-check form-check-inline">
+                                <input class="form-check-input" type="checkbox" id="surfO" checked="@((_toothReq.AffectedSurfaces & 4) != 0)" @onchange="e => ToggleSurface(4, (bool)e.Value!)" />
+                                <label class="form-check-label small" for="surfO">Occlusal (O)</label>
+                            </div>
+                            <div class="form-check form-check-inline">
+                                <input class="form-check-input" type="checkbox" id="surfB" checked="@((_toothReq.AffectedSurfaces & 8) != 0)" @onchange="e => ToggleSurface(8, (bool)e.Value!)" />
+                                <label class="form-check-label small" for="surfB">Buccal (B)</label>
+                            </div>
+                            <div class="form-check form-check-inline">
+                                <input class="form-check-input" type="checkbox" id="surfL" checked="@((_toothReq.AffectedSurfaces & 16) != 0)" @onchange="e => ToggleSurface(16, (bool)e.Value!)" />
+                                <label class="form-check-label small" for="surfL">Lingual (L)</label>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label small fw-semibold">Klinik Notlar</label>
+                        <textarea class="form-control" rows="2" placeholder="Kavite derinliği, hassasiyet..." @bind="_toothReq.Notes"></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" @onclick="() => _showToothModal = false">İptal</button>
+                    <button type="button" class="btn btn-primary" @onclick="SubmitToothCondition">Kaydet</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+<!-- Modal: Plan Procedure -->
+@if (_showPlanProcModal)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title fw-bold">Yeni Diş Tedavisi Planla</h5>
+                    <button type="button" class="btn-close" @onclick="() => _showPlanProcModal = false"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <label class="form-label small fw-semibold">Diş No (Boş ise Genel)</label>
+                            <input type="number" class="form-control" placeholder="16, 21, 36..." @bind="_procReq.ToothNumber" />
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label small fw-semibold">İşlem Kodu *</label>
+                            <select class="form-select" @bind="_procReq.ProcedureCode">
+                                <option value="DNT-FILLING">DNT-FILLING (Kompozit Dolgu)</option>
+                                <option value="DNT-ROOTCANAL">DNT-ROOTCANAL (Kanal Tedavisi)</option>
+                                <option value="DNT-EXTRACT">DNT-EXTRACT (Diş Çekimi)</option>
+                                <option value="DNT-CLEANING">DNT-CLEANING (Detertraj / Temizlik)</option>
+                                <option value="DNT-CROWN">DNT-CROWN (Zirkonyum/Porselen Kuron)</option>
+                                <option value="DNT-IMPLANT">DNT-IMPLANT (Dental İmplant)</option>
+                            </select>
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label small fw-semibold">İşlem Adı *</label>
+                            <input type="text" class="form-control" @bind="_procReq.ProcedureName" />
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label small fw-semibold">Tahmini Ücret (₺)</label>
+                            <input type="number" class="form-control" min="0" step="50" @bind="_procReq.EstimatedCost" />
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label small fw-semibold">Planlanan Tarih</label>
+                            <input type="datetime-local" class="form-control" @bind="_procReq.ScheduledDateUtc" />
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label small fw-semibold">Klinik Notlar</label>
+                            <textarea class="form-control" rows="2" placeholder="Gereken seans, anestezi notu..." @bind="_procReq.ClinicalNotes"></textarea>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" @onclick="() => _showPlanProcModal = false">İptal</button>
+                    <button type="button" class="btn btn-primary" @onclick="SubmitPlanProcedure">Planı Kaydet</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+<!-- Modal: Create Exam -->
+@if (_showExamModal)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title fw-bold">Yeni Diş Muayenesi Kaydet</h5>
+                    <button type="button" class="btn-close" @onclick="() => _showExamModal = false"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label small fw-semibold">Hasta Şikayeti</label>
+                        <input type="text" class="form-control" placeholder="Soğukta sızlama, çiğnemede ağrı..." @bind="_examReq.ChiefComplaint" />
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label small fw-semibold">Tanı ve Bulgular</label>
+                        <textarea class="form-control" rows="2" placeholder="Derin dentin çürüğü, gingivitis..." @bind="_examReq.DiagnosisNotes"></textarea>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label small fw-semibold">Tedavi Plan Özeti</label>
+                        <textarea class="form-control" rows="2" placeholder="Kanal tedavisi + dolgu seansı..." @bind="_examReq.TreatmentPlanSummary"></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" @onclick="() => _showExamModal = false">İptal</button>
+                    <button type="button" class="btn btn-primary" @onclick="SubmitCreateExam">Muayeneyi Kaydet</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+<style>
+    .tooth-btn {
+        width: 44px;
+        height: 52px;
+        padding: 4px 2px;
+        display: inline-flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        border-radius: 6px;
+    }
+</style>
+
+@code {
+    private bool _isLoading = false;
+    private string? _errorMessage;
+    private string _searchPatientId = "00000000-0000-0000-0000-000000000201";
+    private string _activeTab = "procedures";
+
+    private List<ToothConditionResponse> _odontogram = [];
+    private List<DentalProcedureResponse> _procedures = [];
+    private List<DentalExaminationResponse> _examinations = [];
+
+    private int _selectedToothNumber = 0;
+    private List<ToothConditionResponse> _selectedToothHistory = [];
+
+    private bool _showToothModal = false;
+    private int _modalToothNumber = 0;
+    private RecordToothConditionRequest _toothReq = new();
+
+    private bool _showPlanProcModal = false;
+    private PlanDentalProcedureRequest _procReq = new();
+
+    private bool _showExamModal = false;
+    private CreateDentalExaminationRequest _examReq = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadPatientDentalData();
+    }
+
+    private async Task LoadPatientDentalData()
+    {
+        _isLoading = true;
+        _errorMessage = null;
+
+        try
+        {
+            if (Guid.TryParse(_searchPatientId, out var patientId))
+            {
+                _odontogram = await SpecialtyClient.GetLatestOdontogramAsync(patientId);
+                _procedures = await SpecialtyClient.GetDentalProceduresAsync(patientId);
+                _examinations = await SpecialtyClient.GetDentalExaminationsAsync(patientId);
+
+                if (_selectedToothNumber > 0)
+                {
+                    await SelectTooth(_selectedToothNumber);
+                }
+            }
+            else
+            {
+                _odontogram = [];
+                _procedures = [];
+                _examinations = [];
+            }
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"Diş verileri yüklenirken hata: {ex.Message}";
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+    }
+
+    private ToothConditionResponse? GetToothCondition(int toothNumber) =>
+        _odontogram.FirstOrDefault(t => t.ToothNumber == toothNumber);
+
+    private async Task SelectTooth(int toothNumber)
+    {
+        _selectedToothNumber = toothNumber;
+        if (Guid.TryParse(_searchPatientId, out var pId))
+        {
+            _selectedToothHistory = await SpecialtyClient.GetToothHistoryAsync(pId, toothNumber);
+        }
+    }
+
+    private void OpenToothConditionModal(int toothNumber)
+    {
+        _modalToothNumber = toothNumber;
+        var current = GetToothCondition(toothNumber);
+        _toothReq = new RecordToothConditionRequest
+        {
+            ToothNumber = toothNumber,
+            Condition = current?.Condition ?? "Sound",
+            AffectedSurfaces = current?.AffectedSurfaces ?? 0,
+            Notes = current?.Notes,
+        };
+        _showToothModal = true;
+    }
+
+    private void ToggleSurface(int flag, bool isChecked)
+    {
+        if (isChecked)
+        {
+            _toothReq.AffectedSurfaces |= flag;
+        }
+        else
+        {
+            _toothReq.AffectedSurfaces &= ~flag;
+        }
+    }
+
+    private async Task SubmitToothCondition()
+    {
+        try
+        {
+            if (Guid.TryParse(_searchPatientId, out var pId))
+            {
+                await SpecialtyClient.RecordToothConditionAsync(pId, _toothReq);
+                _showToothModal = false;
+                await LoadPatientDentalData();
+            }
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"Diş durumu kaydedilirken hata: {ex.Message}";
+        }
+    }
+
+    private void OpenPlanProcedureModal()
+    {
+        _procReq = new PlanDentalProcedureRequest
+        {
+            PatientId = Guid.TryParse(_searchPatientId, out var pId) ? pId : Guid.Parse("00000000-0000-0000-0000-000000000201"),
+            ToothNumber = _selectedToothNumber > 0 ? _selectedToothNumber : 16,
+            ProcedureCode = "DNT-FILLING",
+            ProcedureName = "Kompozit Dolgu",
+            EstimatedCost = 750,
+            PerformedByDoctorId = Guid.Parse("00000000-0000-0000-0000-000000000102"),
+            ScheduledDateUtc = DateTime.UtcNow.AddDays(2),
+        };
+        _showPlanProcModal = true;
+    }
+
+    private async Task SubmitPlanProcedure()
+    {
+        try
+        {
+            await SpecialtyClient.PlanDentalProcedureAsync(_procReq);
+            _showPlanProcModal = false;
+            await LoadPatientDentalData();
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"Tedavi planlanırken hata: {ex.Message}";
+        }
+    }
+
+    private async Task CompleteProcedure(Guid procId)
+    {
+        try
+        {
+            await SpecialtyClient.CompleteDentalProcedureAsync(procId, new CompleteDentalProcedureRequest
+            {
+                CompletedDateUtc = DateTime.UtcNow,
+                CompletionNotes = "Tedavi başarıyla tamamlandı",
+            });
+            await LoadPatientDentalData();
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"İşlem tamamlanırken hata: {ex.Message}";
+        }
+    }
+
+    private void OpenExamModal()
+    {
+        _examReq = new CreateDentalExaminationRequest
+        {
+            PatientId = Guid.TryParse(_searchPatientId, out var pId) ? pId : Guid.Parse("00000000-0000-0000-0000-000000000201"),
+            DentistId = Guid.Parse("00000000-0000-0000-0000-000000000102"),
+            ExaminationDateUtc = DateTime.UtcNow,
+            ChiefComplaint = "Genel diş kontrolü ve hassasiyet",
+            DiagnosisNotes = "Diş #16 oklüzal çürük mevcut",
+            TreatmentPlanSummary = "16 no'lu dişe kompozit dolgu planlandı",
+        };
+        _showExamModal = true;
+    }
+
+    private async Task SubmitCreateExam()
+    {
+        try
+        {
+            await SpecialtyClient.CreateDentalExaminationAsync(_examReq);
+            _showExamModal = false;
+            await LoadPatientDentalData();
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"Muayene kaydedilirken hata: {ex.Message}";
+        }
+    }
+
+    private static string GetToothButtonClass(string? condition) => condition switch
+    {
+        "Caries" => "btn-danger text-white",
+        "Filled" => "btn-primary text-white",
+        "Missing" => "btn-secondary text-white",
+        "Crown" => "btn-warning text-dark",
+        "RootCanalTreated" => "btn-info text-dark",
+        "Implant" => "btn-dark text-white",
+        _ => "btn-outline-secondary",
+    };
+
+    private static string GetToothIcon(string? condition) => condition switch
+    {
+        "Caries" => "bi-circle-fill",
+        "Filled" => "bi-square-fill",
+        "Missing" => "bi-x-lg",
+        "Crown" => "bi-gem",
+        "RootCanalTreated" => "bi-activity",
+        "Implant" => "bi-pin-fill",
+        _ => "bi-circle",
+    };
+
+    private static string GetConditionLabel(string condition) => condition switch
+    {
+        "Sound" => "Sağlam",
+        "Caries" => "Çürük",
+        "Filled" => "Dolgulu",
+        "Missing" => "Eksik / Çekilmiş",
+        "Impacted" => "Gömülü",
+        "Crown" => "Kuron / Kaplama",
+        "RootCanalTreated" => "Kanal Tedavili",
+        "Implant" => "Dental İmplant",
+        "DecayedRoot" => "Kök Kalıntısı",
+        "Fractured" => "Kırık",
+        _ => condition,
+    };
+}

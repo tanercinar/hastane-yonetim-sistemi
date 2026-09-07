@@ -1,0 +1,437 @@
+@page "/inpatient/beds"
+@using HospitalManagement.Contracts.Inpatient
+@using HospitalManagement.Web.Client.Inpatient
+@inject IInpatientApiClient InpatientApi
+
+<PageTitle>Yatak & Servis Yönetimi — HMS</PageTitle>
+
+<div class="container-fluid py-3">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <div>
+            <h2 class="fw-bold mb-0">Yatak & Servis Yönetimi</h2>
+            <p class="text-muted mb-0">Klinik servisler, odalar, yatak doluluk ve bakım durumu takip panosu.</p>
+        </div>
+        <div>
+            <button class="btn btn-outline-primary" @onclick="RefreshDataAsync" disabled="@_isLoading">
+                <i class="bi bi-arrow-clockwise me-1"></i> Yenile
+            </button>
+        </div>
+    </div>
+
+    @if (!string.IsNullOrWhiteSpace(_errorMessage))
+    {
+        <div class="alert alert-danger alert-dismissible fade show" role="alert">
+            <i class="bi bi-exclamation-triangle-fill me-2"></i>@_errorMessage
+            <button type="button" class="btn-close" @onclick="() => _errorMessage = null"></button>
+        </div>
+    }
+
+    @if (!string.IsNullOrWhiteSpace(_successMessage))
+    {
+        <div class="alert alert-success alert-dismissible fade show" role="alert">
+            <i class="bi bi-check-circle-fill me-2"></i>@_successMessage
+            <button type="button" class="btn-close" @onclick="() => _successMessage = null"></button>
+        </div>
+    }
+
+    @if (_occupancySummary is not null)
+    {
+        <div class="row g-3 mb-4">
+            <div class="col-md-2">
+                <div class="card shadow-sm border-0 text-center p-3">
+                    <div class="text-muted small">Toplam Yatak</div>
+                    <div class="fs-3 fw-bold text-primary">@_occupancySummary.TotalBeds</div>
+                </div>
+            </div>
+            <div class="col-md-2">
+                <div class="card shadow-sm border-0 text-center p-3">
+                    <div class="text-muted small">Boş / Müsait</div>
+                    <div class="fs-3 fw-bold text-success">@_occupancySummary.AvailableBeds</div>
+                </div>
+            </div>
+            <div class="col-md-2">
+                <div class="card shadow-sm border-0 text-center p-3">
+                    <div class="text-muted small">Dolu Yatak</div>
+                    <div class="fs-3 fw-bold text-danger">@_occupancySummary.OccupiedBeds</div>
+                </div>
+            </div>
+            <div class="col-md-2">
+                <div class="card shadow-sm border-0 text-center p-3">
+                    <div class="text-muted small">Temizlikte</div>
+                    <div class="fs-3 fw-bold text-warning">@_occupancySummary.CleaningBeds</div>
+                </div>
+            </div>
+            <div class="col-md-2">
+                <div class="card shadow-sm border-0 text-center p-3">
+                    <div class="text-muted small">Bakım Dışı</div>
+                    <div class="fs-3 fw-bold text-secondary">@_occupancySummary.MaintenanceBeds</div>
+                </div>
+            </div>
+            <div class="col-md-2">
+                <div class="card shadow-sm border-0 text-center p-3">
+                    <div class="text-muted small">Doluluk Oranı</div>
+                    <div class="fs-3 fw-bold text-info">%@_occupancySummary.OccupancyRatePercent</div>
+                </div>
+            </div>
+        </div>
+    }
+
+    <div class="card shadow-sm border-0 mb-4">
+        <div class="card-body">
+            <div class="row g-3 align-items-center">
+                <div class="col-md-5">
+                    <label class="form-label small fw-semibold">Servis Filtresi</label>
+                    <select class="form-select" @bind="_selectedWardId" @bind:after="OnFilterChangedAsync">
+                        <option value="">Tüm Servisler</option>
+                        @foreach (var ward in _wards)
+                        {
+                            <option value="@ward.Id">@ward.Name (@ward.Building - @ward.Floor)</option>
+                        }
+                    </select>
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label small fw-semibold">Yatak Durumu</label>
+                    <select class="form-select" @bind="_selectedStatus" @bind:after="OnFilterChangedAsync">
+                        <option value="">Tüm Durumlar</option>
+                        <option value="Available">Boş / Müsait</option>
+                        <option value="Occupied">Dolu</option>
+                        <option value="Cleaning">Temizlikte</option>
+                        <option value="Maintenance">Bakım Dışı</option>
+                        <option value="Reserved">Rezerve</option>
+                    </select>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    @if (_isLoading)
+    {
+        <div class="text-center py-5">
+            <div class="spinner-border text-primary" role="status">
+                <span class="visually-hidden">Yükleniyor...</span>
+            </div>
+            <p class="text-muted mt-2">Yatak ve servis verileri alınıyor...</p>
+        </div>
+    }
+    else if (_wards.Count == 0)
+    {
+        <div class="alert alert-info">Sistemde tanımlı servis bulunamadı.</div>
+    }
+    else
+    {
+        @foreach (var ward in GetFilteredWards())
+        {
+            var wardRooms = _roomsByWard.GetValueOrDefault(ward.Id, []);
+            <div class="card shadow-sm border-0 mb-4">
+                <div class="card-header bg-light d-flex justify-content-between align-items-center py-3">
+                    <div>
+                        <h5 class="fw-bold mb-0">@ward.Name</h5>
+                        <span class="badge bg-secondary me-1">@ward.Code</span>
+                        <span class="text-muted small">@ward.Building • @ward.Floor • Tip: @ward.WardType</span>
+                    </div>
+                    <div>
+                        <span class="badge bg-primary fs-6">Toplam: @ward.TotalBeds Yatak</span>
+                        <span class="badge bg-success fs-6 ms-1">Müsait: @ward.AvailableBeds</span>
+                    </div>
+                </div>
+                <div class="card-body">
+                    @if (wardRooms.Count == 0)
+                    {
+                        <div class="text-muted small py-2">Bu serviste kayıtlı oda bulunmuyor.</div>
+                    }
+                    else
+                    {
+                        <div class="row g-3">
+                            @foreach (var room in wardRooms)
+                            {
+                                var filteredBeds = GetFilteredBeds(room.Beds);
+                                if (filteredBeds.Count == 0 && !string.IsNullOrWhiteSpace(_selectedStatus))
+                                {
+                                    continue;
+                                }
+
+                                <div class="col-lg-6 col-xl-4">
+                                    <div class="card h-100 border">
+                                        <div class="card-header bg-white d-flex justify-content-between align-items-center py-2">
+                                            <span class="fw-bold">Oda @room.RoomNumber</span>
+                                            <div>
+                                                @if (room.GenderConstraint == "MaleOnly")
+                                                {
+                                                    <span class="badge bg-primary text-white me-1">Erkek</span>
+                                                }
+                                                else if (room.GenderConstraint == "FemaleOnly")
+                                                {
+                                                    <span class="badge bg-danger text-white me-1">Kadın</span>
+                                                }
+                                                else
+                                                {
+                                                    <span class="badge bg-secondary text-white me-1">Genel</span>
+                                                }
+
+                                                @if (room.IsolationType != "None")
+                                                {
+                                                    <span class="badge bg-warning text-dark me-1">İzole: @room.IsolationType</span>
+                                                }
+
+                                                @if (room.IsNegativePressure)
+                                                {
+                                                    <span class="badge bg-info text-dark">Negatif Basınç</span>
+                                                }
+                                            </div>
+                                        </div>
+                                        <div class="card-body p-2">
+                                            @if (filteredBeds.Count == 0)
+                                            {
+                                                <div class="text-muted small text-center py-3">Filtreye uygun yatak yok.</div>
+                                            }
+                                            else
+                                            {
+                                                <div class="d-flex flex-column gap-2">
+                                                    @foreach (var bed in filteredBeds)
+                                                    {
+                                                        <div class="p-2 border rounded @GetBedCardClass(bed.Status)">
+                                                            <div class="d-flex justify-content-between align-items-center mb-1">
+                                                                <span class="fw-bold">@bed.BedNumber</span>
+                                                                @GetBedStatusBadge(bed.Status)
+                                                            </div>
+                                                            <div class="small text-muted mb-2">
+                                                                @if (bed.HasTelemetry) { <span class="badge bg-light text-dark border me-1">Telemetri</span> }
+                                                                @if (bed.HasOxygen) { <span class="badge bg-light text-dark border me-1">Oksijen</span> }
+                                                                @if (bed.HasVentilator) { <span class="badge bg-light text-dark border me-1">Ventilatör</span> }
+                                                            </div>
+                                                            @if (!string.IsNullOrWhiteSpace(bed.MaintenanceReason))
+                                                            {
+                                                                <div class="small text-danger mb-2">
+                                                                    <i class="bi bi-tools me-1"></i>@bed.MaintenanceReason
+                                                                </div>
+                                                            }
+                                                            <div class="d-flex gap-1">
+                                                                @if (bed.Status == "Cleaning")
+                                                                {
+                                                                    <button class="btn btn-sm btn-outline-success w-100" @onclick="() => CompleteCleaningAsync(bed.Id)">
+                                                                        <i class="bi bi-check2-circle me-1"></i> Temizlik Tamamlandı
+                                                                    </button>
+                                                                }
+                                                                else if (bed.Status == "Maintenance")
+                                                                {
+                                                                    <button class="btn btn-sm btn-outline-success w-100" @onclick="() => RestoreFromMaintenanceAsync(bed.Id)">
+                                                                        <i class="bi bi-wrench-adjustable-circle me-1"></i> Bakımı Bitir & Aç
+                                                                    </button>
+                                                                }
+                                                                else if (bed.Status == "Available")
+                                                                {
+                                                                    <button class="btn btn-sm btn-outline-secondary w-100" @onclick="() => PromptMaintenanceAsync(bed.Id)">
+                                                                        <i class="bi bi-tools me-1"></i> Bakıma Al
+                                                                    </button>
+                                                                }
+                                                            </div>
+                                                        </div>
+                                                    }
+                                                </div>
+                                            }
+                                        </div>
+                                    </div>
+                                </div>
+                            }
+                        </div>
+                    }
+                </div>
+            </div>
+        }
+    }
+</div>
+
+@* Maintenance Reason Modal *@
+@if (_showMaintenanceModal)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background: rgba(0,0,0,0.5);">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Yatağı Bakıma Al</h5>
+                    <button type="button" class="btn-close" @onclick="() => _showMaintenanceModal = false"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label">Bakım ve Onarım Gerekçesi</label>
+                        <textarea class="form-control" rows="3" @bind="_maintenanceReason" placeholder="Arıza, mekanik bakım veya teknik servis açıklaması..."></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" @onclick="() => _showMaintenanceModal = false">İptal</button>
+                    <button type="button" class="btn btn-danger" @onclick="ConfirmMaintenanceAsync" disabled="@string.IsNullOrWhiteSpace(_maintenanceReason)">
+                        Bakıma Al
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private List<WardResponse> _wards = [];
+    private Dictionary<Guid, List<RoomResponse>> _roomsByWard = new();
+    private BedOccupancySummaryResponse? _occupancySummary;
+    private bool _isLoading = true;
+    private string? _errorMessage;
+    private string? _successMessage;
+
+    private string _selectedWardId = "";
+    private string _selectedStatus = "";
+
+    private bool _showMaintenanceModal = false;
+    private Guid _pendingMaintenanceBedId = Guid.Empty;
+    private string _maintenanceReason = "";
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadDataAsync();
+    }
+
+    private async Task LoadDataAsync()
+    {
+        _isLoading = true;
+        _errorMessage = null;
+        try
+        {
+            _wards = await InpatientApi.GetWardsAsync();
+            _roomsByWard.Clear();
+            foreach (var ward in _wards)
+            {
+                var rooms = await InpatientApi.GetRoomsByWardIdAsync(ward.Id);
+                _roomsByWard[ward.Id] = rooms;
+            }
+
+            Guid? wardFilter = Guid.TryParse(_selectedWardId, out var wid) ? wid : null;
+            _occupancySummary = await InpatientApi.GetOccupancySummaryAsync(wardFilter);
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"Veriler yüklenirken hata oluştu: {ex.Message}";
+        }
+        finally
+        {
+            _isLoading = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task RefreshDataAsync()
+    {
+        await LoadDataAsync();
+    }
+
+    private async Task OnFilterChangedAsync()
+    {
+        Guid? wardFilter = Guid.TryParse(_selectedWardId, out var wid) ? wid : null;
+        _occupancySummary = await InpatientApi.GetOccupancySummaryAsync(wardFilter);
+    }
+
+    private IEnumerable<WardResponse> GetFilteredWards()
+    {
+        if (Guid.TryParse(_selectedWardId, out var wid))
+        {
+            return _wards.Where(w => w.Id == wid);
+        }
+        return _wards;
+    }
+
+    private List<BedResponse> GetFilteredBeds(List<BedResponse> beds)
+    {
+        if (!string.IsNullOrWhiteSpace(_selectedStatus))
+        {
+            return beds.Where(b => string.Equals(b.Status, _selectedStatus, StringComparison.OrdinalIgnoreCase)).ToList();
+        }
+        return beds;
+    }
+
+    private async Task CompleteCleaningAsync(Guid bedId)
+    {
+        _errorMessage = null;
+        _successMessage = null;
+        var res = await InpatientApi.UpdateBedStatusAsync(bedId, new UpdateBedStatusRequest { NewStatus = "Available" });
+        if (res is not null)
+        {
+            _successMessage = $"Yatak ({res.BedNumber}) temizliği onaylandı ve kullanıma açıldı.";
+            await LoadDataAsync();
+        }
+        else
+        {
+            _errorMessage = "Yatak durumu güncellenemedi.";
+        }
+    }
+
+    private async Task RestoreFromMaintenanceAsync(Guid bedId)
+    {
+        _errorMessage = null;
+        _successMessage = null;
+        var res = await InpatientApi.UpdateBedStatusAsync(bedId, new UpdateBedStatusRequest { NewStatus = "Available" });
+        if (res is not null)
+        {
+            _successMessage = $"Yatak ({res.BedNumber}) bakımdan çıkarıldı ve kullanıma açıldı.";
+            await LoadDataAsync();
+        }
+        else
+        {
+            _errorMessage = "Yatak durumu güncellenemedi.";
+        }
+    }
+
+    private void PromptMaintenanceAsync(Guid bedId)
+    {
+        _pendingMaintenanceBedId = bedId;
+        _maintenanceReason = "Rutin teknik kontrol";
+        _showMaintenanceModal = true;
+    }
+
+    private async Task ConfirmMaintenanceAsync()
+    {
+        _showMaintenanceModal = false;
+        _errorMessage = null;
+        _successMessage = null;
+
+        var res = await InpatientApi.UpdateBedStatusAsync(_pendingMaintenanceBedId, new UpdateBedStatusRequest
+        {
+            NewStatus = "Maintenance",
+            Reason = _maintenanceReason
+        });
+
+        if (res is not null)
+        {
+            _successMessage = $"Yatak ({res.BedNumber}) bakım dışına alındı.";
+            await LoadDataAsync();
+        }
+        else
+        {
+            _errorMessage = "Yatak bakım dışına alınamadı.";
+        }
+    }
+
+    private static string GetBedCardClass(string status) => status switch
+    {
+        "Available" => "bg-light border-success",
+        "Occupied" => "bg-light border-danger",
+        "Cleaning" => "bg-light border-warning",
+        "Maintenance" => "bg-light border-secondary",
+        "Reserved" => "bg-light border-info",
+        _ => "bg-light"
+    };
+
+    private static RenderFragment GetBedStatusBadge(string status) => builder =>
+    {
+        var (cls, text) = status switch
+        {
+            "Available" => ("bg-success", "Boş"),
+            "Occupied" => ("bg-danger", "Dolu"),
+            "Cleaning" => ("bg-warning text-dark", "Temizlikte"),
+            "Maintenance" => ("bg-secondary", "Bakım Dışı"),
+            "Reserved" => ("bg-info text-dark", "Rezerve"),
+            _ => ("bg-secondary", status)
+        };
+
+        builder.OpenElement(0, "span");
+        builder.AddAttribute(1, "class", $"badge {cls}");
+        builder.AddContent(2, text);
+        builder.CloseElement();
+    };
+}

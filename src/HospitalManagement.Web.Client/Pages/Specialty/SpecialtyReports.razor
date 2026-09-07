@@ -1,0 +1,229 @@
+@page "/specialty/reports"
+@using HospitalManagement.Contracts.Specialty
+@using HospitalManagement.Web.Client.Specialty
+@using Microsoft.AspNetCore.Authorization
+@attribute [Authorize]
+@inject ISpecialtyCareApiClient SpecialtyClient
+
+<PageTitle>Uzmanlık Operasyonel Göstergeleri ve Raporlar — Hastane Yönetim Sistemi</PageTitle>
+
+<div class="container-fluid px-4 py-3">
+    <!-- Privacy Statement Banner -->
+    <div class="alert alert-secondary border-secondary d-flex align-items-center mb-4" role="alert">
+        <i class="bi bi-shield-check fs-4 me-3 text-secondary"></i>
+        <div>
+            <strong>Gizlilik ve Güvenlik Güvencesi:</strong> Genel operasyonel gösterge panelleri hasta kimlik, tıbbi ayrıntı veya açık adres bilgisi içermez. Yalnızca sayılar ve oranlar üzerinden anonimleştirilmiş özet sunulur.
+        </div>
+    </div>
+
+    <!-- Header & Refresh -->
+    <div class="d-flex justify-content-between align-items-center mb-4 pb-2 border-bottom">
+        <div>
+            <h2 class="h3 fw-bold text-primary mb-1">Uzmanlık Operasyonel Göstergeleri ve Raporlar</h2>
+            <p class="text-muted small mb-0">Kadın doğum, diş hekimliği ve evde sağlık hizmetleri operasyonel sayım ve dağılım özeti.</p>
+        </div>
+        <button class="btn btn-outline-primary d-flex align-items-center gap-2" @onclick="LoadSummaryAsync">
+            <i class="bi bi-arrow-clockwise"></i>
+            <span>Verileri Yenile</span>
+        </button>
+    </div>
+
+    @if (_isLoading)
+    {
+        <div class="text-center py-5">
+            <div class="spinner-border text-primary" role="status">
+                <span class="visually-hidden">Yükleniyor...</span>
+            </div>
+            <p class="text-muted mt-2">Uzmanlık göstergeleri hesaplanıyor...</p>
+        </div>
+    }
+    else if (_errorMessage is not null)
+    {
+        <div class="alert alert-danger" role="alert">
+            <i class="bi bi-x-circle me-2"></i>@_errorMessage
+        </div>
+    }
+    else if (_summary is not null)
+    {
+        <!-- SECTION 1: OBSTETRICS -->
+        <div class="row g-3 mb-4">
+            <div class="col-12">
+                <h5 class="fw-bold text-dark mb-0"><i class="bi bi-heart-pulse text-danger me-2"></i>Kadın Doğum ve Gebelik Göstergeleri</h5>
+            </div>
+            <div class="col-md-3">
+                <div class="card shadow-sm border-0 border-start border-4 border-danger h-100">
+                    <div class="card-body">
+                        <span class="text-muted small text-uppercase fw-semibold">Aktif Gebelik Takibi</span>
+                        <h3 class="fw-bold my-2 text-danger">@_summary.ActivePregnanciesCount</h3>
+                        <span class="badge bg-danger-subtle text-danger border border-danger-subtle">
+                            @_summary.HighRiskPregnanciesCount Yüksek Riskli
+                        </span>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card shadow-sm border-0 border-start border-4 border-primary h-100">
+                    <div class="card-body">
+                        <span class="text-muted small text-uppercase fw-semibold">Toplam Doğum Kaydı</span>
+                        <h3 class="fw-bold my-2 text-primary">@_summary.TotalDeliveriesCount</h3>
+                        <span class="text-muted small">Gerçekleşen doğumlar</span>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card shadow-sm border-0 border-start border-4 border-success h-100">
+                    <div class="card-body">
+                        <span class="text-muted small text-uppercase fw-semibold">Normal Doğum (Vaginal)</span>
+                        <h3 class="fw-bold my-2 text-success">@_summary.NormalDeliveriesCount</h3>
+                        <span class="badge bg-success-subtle text-success border border-success-subtle">
+                            @(GetPercentage(_summary.NormalDeliveriesCount, _summary.TotalDeliveriesCount))% Oran
+                        </span>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card shadow-sm border-0 border-start border-4 border-warning h-100">
+                    <div class="card-body">
+                        <span class="text-muted small text-uppercase fw-semibold">Sezaryen Doğum (C/S)</span>
+                        <h3 class="fw-bold my-2 text-warning">@_summary.CesareanDeliveriesCount</h3>
+                        <span class="badge bg-warning-subtle text-dark border border-warning-subtle">
+                            @(GetPercentage(_summary.CesareanDeliveriesCount, _summary.TotalDeliveriesCount))% Oran
+                        </span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- SECTION 2: ODONTOLOGY -->
+        <div class="row g-3 mb-4">
+            <div class="col-12">
+                <h5 class="fw-bold text-dark mb-0"><i class="bi bi-emoji-smile text-primary me-2"></i>Diş Hekimliği ve Tedavi Göstergeleri</h5>
+            </div>
+            <div class="col-md-3">
+                <div class="card shadow-sm border-0 border-start border-4 border-primary h-100">
+                    <div class="card-body">
+                        <span class="text-muted small text-uppercase fw-semibold">Toplam Diş Tedavisi</span>
+                        <h3 class="fw-bold my-2 text-primary">@_summary.TotalDentalProceduresCount</h3>
+                        <span class="text-muted small">Planlanan & Tamamlanan</span>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card shadow-sm border-0 border-start border-4 border-success h-100">
+                    <div class="card-body">
+                        <span class="text-muted small text-uppercase fw-semibold">Tamamlanan Tedaviler</span>
+                        <h3 class="fw-bold my-2 text-success">@_summary.CompletedDentalProceduresCount</h3>
+                        <span class="badge bg-success-subtle text-success border border-success-subtle">
+                            @(GetPercentage(_summary.CompletedDentalProceduresCount, _summary.TotalDentalProceduresCount))% Başarı
+                        </span>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card shadow-sm border-0 border-start border-4 border-warning h-100">
+                    <div class="card-body">
+                        <span class="text-muted small text-uppercase fw-semibold">Planlanan Tedaviler</span>
+                        <h3 class="fw-bold my-2 text-warning">@_summary.PlannedDentalProceduresCount</h3>
+                        <span class="text-muted small">İşlem bekleyen hastalar</span>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card shadow-sm border-0 border-start border-4 border-info h-100">
+                    <div class="card-body">
+                        <span class="text-muted small text-uppercase fw-semibold">Kayıtlı Diş Muayenesi</span>
+                        <h3 class="fw-bold my-2 text-info">@_summary.TotalDentalExaminationsCount</h3>
+                        <span class="text-muted small">Muayene protokolleri</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- SECTION 3: HOME HEALTH -->
+        <div class="row g-3 mb-4">
+            <div class="col-12">
+                <h5 class="fw-bold text-dark mb-0"><i class="bi bi-house-heart text-success me-2"></i>Evde Sağlık Ziyaret Göstergeleri</h5>
+            </div>
+            <div class="col-md-3">
+                <div class="card shadow-sm border-0 border-start border-4 border-info h-100">
+                    <div class="card-body">
+                        <span class="text-muted small text-uppercase fw-semibold">Aktif Ev Ziyaretleri</span>
+                        <h3 class="fw-bold my-2 text-info">@_summary.ActiveHomeVisitsCount</h3>
+                        <span class="text-muted small">Talep, atandı ve yolda</span>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card shadow-sm border-0 border-start border-4 border-warning h-100">
+                    <div class="card-body">
+                        <span class="text-muted small text-uppercase fw-semibold">Bekleyen Ziyaret Talepleri</span>
+                        <h3 class="fw-bold my-2 text-warning">@_summary.PendingHomeVisitRequestsCount</h3>
+                        <span class="badge bg-warning-subtle text-dark border border-warning-subtle">
+                            Görevlendirme bekliyor
+                        </span>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card shadow-sm border-0 border-start border-4 border-danger h-100">
+                    <div class="card-body">
+                        <span class="text-muted small text-uppercase fw-semibold">Acil Öncelikli Talepler</span>
+                        <h3 class="fw-bold my-2 text-danger">@_summary.UrgentHomeVisitsCount</h3>
+                        <span class="badge bg-danger-subtle text-danger border border-danger-subtle">
+                            Öncelikli müdahale
+                        </span>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card shadow-sm border-0 border-start border-4 border-success h-100">
+                    <div class="card-body">
+                        <span class="text-muted small text-uppercase fw-semibold">Tamamlanan Ziyaretler</span>
+                        <h3 class="fw-bold my-2 text-success">@_summary.CompletedHomeVisitsCount</h3>
+                        <span class="text-muted small">Klinik notu işlenmiş</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="text-end text-muted small">
+            Rapor Oluşturulma Zamanı: @_summary.GeneratedAtUtc.ToLocalTime().ToString("dd.MM.yyyy HH:mm:ss")
+        </div>
+    }
+</div>
+
+@code {
+    private bool _isLoading = false;
+    private string? _errorMessage;
+    private SpecialtyOperationalSummaryResponse? _summary;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadSummaryAsync();
+    }
+
+    private async Task LoadSummaryAsync()
+    {
+        _isLoading = true;
+        _errorMessage = null;
+
+        try
+        {
+            _summary = await SpecialtyClient.GetSpecialtyOperationalSummaryAsync();
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"Uzmanlık raporları yüklenirken hata: {ex.Message}";
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+    }
+
+    private static int GetPercentage(int part, int total)
+    {
+        if (total == 0) return 0;
+        return (int)Math.Round((double)part / total * 100);
+    }
+}

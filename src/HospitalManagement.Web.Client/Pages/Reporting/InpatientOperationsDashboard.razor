@@ -1,0 +1,197 @@
+@page "/reporting/inpatient-operations"
+@using HospitalManagement.Contracts.Reporting
+@using HospitalManagement.Web.Client.Identity
+@using HospitalManagement.Web.Client.Reporting
+@using Microsoft.AspNetCore.Authorization
+@attribute [Authorize]
+@inject IReportingApiClient ReportingClient
+@inject UserSessionState SessionState
+
+<PageTitle>Yatak, Acil ve Ameliyathane Panosu — HMS</PageTitle>
+
+<div class="ui-container" style="max-width: 1200px; margin: 0 auto; padding: 1.5rem 1rem;">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; flex-wrap: wrap; gap: 1rem;">
+        <div>
+            <h1 style="font-size: 1.5rem; font-weight: 700; color: var(--color-text-main); margin: 0;">Yatak, Acil ve Ameliyathane Operasyon Panosu</h1>
+            <p style="font-size: 0.875rem; color: var(--color-text-muted); margin: 0.25rem 0 0 0;">
+                Klinik servis yatak dolulukları, bekleyen hasta transferleri ve acil triyaj operasyon durumu
+            </p>
+        </div>
+        <div style="display: flex; align-items: center; gap: 0.75rem;">
+            <input type="date" class="ui-input" style="width: auto;" @bind="SelectedDate" @bind:after="LoadDashboardAsync" />
+            <button type="button" class="ui-button ui-button--secondary" @onclick="LoadDashboardAsync" disabled="@IsLoading">
+                Yenile
+            </button>
+        </div>
+    </div>
+
+    @if (IsForbidden)
+    {
+        <div class="ui-card" style="padding: 2rem; text-align: center; border-left: 4px solid var(--color-danger);">
+            <h2 style="font-size: 1.125rem; font-weight: 600; color: var(--color-danger); margin: 0 0 0.5rem 0;">Erişim Yetkisi Yok</h2>
+            <p style="color: var(--color-text-muted); margin: 0;">Bu operasyon panosunu görüntülemek için gereken yetkiye sahip değilsiniz.</p>
+        </div>
+    }
+    else if (IsLoading)
+    {
+        <div class="ui-card" style="padding: 3rem; text-align: center;">
+            <div class="ui-spinner" style="margin: 0 auto 1rem auto;"></div>
+            <p style="color: var(--color-text-muted); margin: 0;">Yatak ve acil metrikleri yükleniyor...</p>
+        </div>
+    }
+    else if (!string.IsNullOrEmpty(ErrorMessage))
+    {
+        <div class="ui-card" style="padding: 2rem; text-align: center; border-left: 4px solid var(--color-danger);">
+            <h2 style="font-size: 1.125rem; font-weight: 600; color: var(--color-danger); margin: 0 0 0.5rem 0;">Hata Oluştu</h2>
+            <p style="color: var(--color-text-muted); margin: 0 0 1rem 0;">@ErrorMessage</p>
+            <button type="button" class="ui-button ui-button--primary" @onclick="LoadDashboardAsync">Tekrar Dene</button>
+        </div>
+    }
+    else if (Summary is null || Summary.TotalBeds == 0)
+    {
+        <div class="ui-card" style="padding: 3rem; text-align: center;">
+            <h2 style="font-size: 1.125rem; font-weight: 600; color: var(--color-text-main); margin: 0 0 0.5rem 0;">Kayıtlı Yatak / Operasyon Verisi Yok</h2>
+            <p style="color: var(--color-text-muted); margin: 0;">@SelectedDate.ToString("dd.MM.yyyy") tarihi için servis yatak kaydı bulunamadı.</p>
+        </div>
+    }
+    else
+    {
+        <!-- KPI Summary Cards -->
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 1rem; margin-bottom: 1.5rem;">
+            <div class="ui-card" style="padding: 1.25rem;">
+                <span style="font-size: 0.75rem; font-weight: 600; color: var(--color-text-muted); text-transform: uppercase;">Toplam Yatak</span>
+                <div style="font-size: 1.75rem; font-weight: 700; color: var(--color-text-main); margin-top: 0.25rem;">@Summary.TotalBeds</div>
+            </div>
+            <div class="ui-card" style="padding: 1.25rem;">
+                <span style="font-size: 0.75rem; font-weight: 600; color: var(--color-warning); text-transform: uppercase;">Dolu Yatak</span>
+                <div style="font-size: 1.75rem; font-weight: 700; color: var(--color-warning); margin-top: 0.25rem;">@Summary.OccupiedBeds</div>
+            </div>
+            <div class="ui-card" style="padding: 1.25rem;">
+                <span style="font-size: 0.75rem; font-weight: 600; color: var(--color-success); text-transform: uppercase;">Müsait Yatak</span>
+                <div style="font-size: 1.75rem; font-weight: 700; color: var(--color-success); margin-top: 0.25rem;">@Summary.AvailableBeds</div>
+            </div>
+            <div class="ui-card" style="padding: 1.25rem;">
+                <span style="font-size: 0.75rem; font-weight: 600; color: var(--color-primary); text-transform: uppercase;">Doluluk Oranı</span>
+                <div style="font-size: 1.75rem; font-weight: 700; color: var(--color-primary); margin-top: 0.25rem;">%@Summary.OverallOccupancyRate</div>
+            </div>
+            <div class="ui-card" style="padding: 1.25rem;">
+                <span style="font-size: 0.75rem; font-weight: 600; color: #3b82f6; text-transform: uppercase;">Bekleyen Transfer</span>
+                <div style="font-size: 1.75rem; font-weight: 700; color: #3b82f6; margin-top: 0.25rem;">@Summary.PendingTransfers</div>
+            </div>
+            <div class="ui-card" style="padding: 1.25rem;">
+                <span style="font-size: 0.75rem; font-weight: 600; color: var(--color-danger); text-transform: uppercase;">Acil Kuyruğu</span>
+                <div style="font-size: 1.75rem; font-weight: 700; color: var(--color-danger); margin-top: 0.25rem;">@Summary.EmergencyWaitingCount</div>
+            </div>
+        </div>
+
+        <!-- Wards Occupancy Breakdown Table -->
+        <div class="ui-card" style="padding: 1.5rem; margin-bottom: 1.5rem;">
+            <h2 style="font-size: 1.125rem; font-weight: 600; margin: 0 0 1rem 0;">Servis ve Bölüm Bazlı Doluluk</h2>
+            <div style="overflow-x: auto;">
+                <table class="ui-table" style="width: 100%;">
+                    <thead>
+                        <tr>
+                            <th>Bölüm Adı</th>
+                            <th>Servis Türü</th>
+                            <th style="text-align: right;">Toplam Yatak</th>
+                            <th style="text-align: right;">Dolu</th>
+                            <th style="text-align: right;">Müsait</th>
+                            <th style="text-align: right;">Doluluk %</th>
+                            <th style="text-align: right;">Bekleyen Transfer</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var ward in WardMetrics)
+                        {
+                            <tr>
+                                <td style="font-weight: 500;">@ward.DepartmentName</td>
+                                <td>@ward.WardType</td>
+                                <td style="text-align: right; font-weight: 600;">@ward.TotalBeds</td>
+                                <td style="text-align: right; color: var(--color-warning);">@ward.OccupiedBeds</td>
+                                <td style="text-align: right; color: var(--color-success); font-weight: 600;">@ward.AvailableBeds</td>
+                                <td style="text-align: right; font-weight: 600;">%@ward.OccupancyRatePercentage</td>
+                                <td style="text-align: right; color: #3b82f6;">@ward.PendingTransfers</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Emergency Triage Queue -->
+        <div class="ui-card" style="padding: 1.5rem;">
+            <h2 style="font-size: 1.125rem; font-weight: 600; margin: 0 0 1rem 0;">Acil Triyaj Bekleme Grupları</h2>
+            <div style="overflow-x: auto;">
+                <table class="ui-table" style="width: 100%;">
+                    <thead>
+                        <tr>
+                            <th>Triyaj Seviyesi</th>
+                            <th style="text-align: right;">Bekleyen Hasta</th>
+                            <th style="text-align: right;">Tahmini Ortalama Süre</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var triage in EmergencyMetrics)
+                        {
+                            <tr>
+                                <td style="font-weight: 600;">@triage.TriageCategory</td>
+                                <td style="text-align: right; font-weight: 700; font-size: 1.1rem;">@triage.WaitingCount</td>
+                                <td style="text-align: right; color: var(--color-text-muted);">
+                                    @(triage.AvgWaitMinutes == 0 ? "Anında müdahale" : $"{triage.AvgWaitMinutes} dk")
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    private DateOnly SelectedDate { get; set; } = DateOnly.FromDateTime(DateTime.UtcNow);
+    private bool IsLoading { get; set; } = true;
+    private bool IsForbidden { get; set; }
+    private string? ErrorMessage { get; set; }
+
+    private InpatientOperationsSummaryResponse? Summary { get; set; }
+    private List<WardOccupancyDetailResponse> WardMetrics { get; set; } = [];
+    private List<EmergencyTriageQueueMetricResponse> EmergencyMetrics { get; set; } = [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadDashboardAsync();
+    }
+
+    private async Task LoadDashboardAsync()
+    {
+        IsLoading = true;
+        IsForbidden = false;
+        ErrorMessage = null;
+
+        try
+        {
+            var summaryTask = ReportingClient.GetInpatientOperationsSummaryAsync(SelectedDate);
+            var wardTask = ReportingClient.GetWardOccupancyAsync(SelectedDate);
+            var emergencyTask = ReportingClient.GetEmergencyTriageMetricsAsync(SelectedDate);
+
+            await Task.WhenAll(summaryTask, wardTask, emergencyTask);
+
+            Summary = await summaryTask;
+            WardMetrics = await wardTask;
+            EmergencyMetrics = await emergencyTask;
+        }
+        catch (HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.Forbidden)
+        {
+            IsForbidden = true;
+        }
+        catch (Exception ex)
+        {
+            ErrorMessage = "Metrikler yüklenirken bir sorun oluştu: " + ex.Message;
+        }
+        finally
+        {
+            IsLoading = false;
+        }
+    }
+}

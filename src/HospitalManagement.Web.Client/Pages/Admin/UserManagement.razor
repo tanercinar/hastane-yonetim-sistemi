@@ -1,0 +1,172 @@
+@page "/admin/users"
+@inject IdentityApiClient Identity
+@inject UserSessionState SessionState
+@inject NavigationManager Navigation
+@inject IStringLocalizer<SharedResources> Localizer
+
+<PageTitle>Kullanıcı Yönetimi | Hastane Yönetim Sistemi</PageTitle>
+
+<header class="page-heading">
+    <span class="page-eyebrow">Sistem Yönetimi</span>
+    <h1>Kullanıcı ve Rol Yönetimi</h1>
+    <p>Sistemdeki sentetik kullanıcıların durumunu ve rollerini yönetin.</p>
+</header>
+
+@if (_isLoading)
+{
+    <LoadingState />
+}
+else if (_isForbidden)
+{
+    <ForbiddenState ActionText="Genel Bakışa Dön" ActionHref="/" />
+}
+else if (_errorMessage is not null && _users is null)
+{
+    <ErrorState ActionText="Yeniden Dene" ActionHref="/admin/users" />
+}
+else if (_users is not null && _users.Items.Count == 0)
+{
+    <EmptyState Title="Kullanıcı bulunamadı" Description="Arama kriterlerinize uygun kayıt yok." />
+}
+else if (_users is not null)
+{
+    @if (!string.IsNullOrWhiteSpace(_statusMessage))
+    {
+        <div class="account-message account-message--success" role="status">
+            @_statusMessage
+        </div>
+    }
+
+    @if (!string.IsNullOrWhiteSpace(_errorMessage))
+    {
+        <div class="account-message account-message--error" role="alert">
+            @_errorMessage
+        </div>
+    }
+
+    <div class="ui-panel" style="margin-bottom: var(--hys-space-4);">
+        <form @onsubmit="SearchAsync" style="display: flex; gap: var(--hys-space-3); align-items: center;">
+            <input class="ui-input" type="search" placeholder="E-posta ile ara..." @bind="_searchQuery" style="flex: 1;" />
+            <button class="ui-button ui-button--primary" type="submit">Ara</button>
+        </form>
+    </div>
+
+    <div class="ui-table-container">
+        <table class="ui-table" style="width: 100%; border-collapse: collapse;">
+            <thead>
+                <tr style="text-align: left; border-bottom: 2px solid var(--hys-color-border);">
+                    <th style="padding: var(--hys-space-3);">E-posta</th>
+                    <th style="padding: var(--hys-space-3);">Hesap Türü</th>
+                    <th style="padding: var(--hys-space-3);">Roller</th>
+                    <th style="padding: var(--hys-space-3);">Durum</th>
+                    <th style="padding: var(--hys-space-3);">İşlemler</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var user in _users.Items)
+                {
+                    <tr style="border-bottom: 1px solid var(--hys-color-border);">
+                        <td style="padding: var(--hys-space-3);"><strong>@user.Email</strong></td>
+                        <td style="padding: var(--hys-space-3);"><span class="ui-badge">@user.AccountKind</span></td>
+                        <td style="padding: var(--hys-space-3);">
+                            @if (user.Roles.Count > 0)
+                            {
+                                @foreach (var role in user.Roles)
+                                {
+                                    <span class="ui-badge" style="margin-right: var(--hys-space-1);">@role</span>
+                                }
+                            }
+                            else
+                            {
+                                <span style="color: var(--hys-color-text-muted);">-</span>
+                            }
+                        </td>
+                        <td style="padding: var(--hys-space-3);">
+                            @if (user.IsEnabled)
+                            {
+                                <span style="color: var(--hys-color-success-400); font-weight: 600;">Etkin</span>
+                            }
+                            else
+                            {
+                                <span style="color: var(--hys-color-danger-700); font-weight: 600;">Devre Dışı</span>
+                            }
+                        </td>
+                        <td style="padding: var(--hys-space-3); display: flex; gap: var(--hys-space-2);">
+                            <button class="ui-button" type="button" @onclick="() => ToggleStatusAsync(user)">
+                                @(user.IsEnabled ? "Devre Dışı Bırak" : "Etkinleştir")
+                            </button>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
+
+@code {
+    private UserListResponse? _users;
+    private bool _isLoading = true;
+    private bool _isForbidden;
+    private string? _errorMessage;
+    private string? _statusMessage;
+    private string? _searchQuery;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await SessionState.EnsureLoadedAsync();
+        if (!SessionState.IsAuthenticated || (!SessionState.IsSystemAdmin && !SessionState.IsHospitalManager))
+        {
+            Navigation.NavigateTo("account/login");
+            return;
+        }
+        await LoadUsersAsync();
+    }
+
+    private async Task LoadUsersAsync()
+    {
+        _isLoading = true;
+        _errorMessage = null;
+        _isForbidden = false;
+
+        try
+        {
+            _users = await Identity.GetUsersAsync(query: _searchQuery);
+            if (_users is null)
+            {
+                _isForbidden = true;
+            }
+        }
+        catch
+        {
+            _errorMessage = "Kullanıcı listesi alınırken bir hata oluştu.";
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+    }
+
+    private async Task SearchAsync()
+    {
+        await LoadUsersAsync();
+    }
+
+    private async Task ToggleStatusAsync(UserSummaryResponse user)
+    {
+        _errorMessage = null;
+        _statusMessage = null;
+
+        var result = await Identity.UpdateUserStatusAsync(user.Id, !user.IsEnabled);
+        if (result.Succeeded)
+        {
+            _statusMessage = user.IsEnabled
+                ? $"'{user.Email}' hesabı devre dışı bırakıldı."
+                : $"'{user.Email}' hesabı etkinleştirildi.";
+            await LoadUsersAsync();
+        }
+        else
+        {
+            _errorMessage = result.Message;
+        }
+    }
+}

@@ -1,0 +1,71 @@
+@page "/account/verify-email"
+@inject IdentityApiClient Identity
+
+<PageTitle>DEMO hesabı doğrula</PageTitle>
+
+<section class="account-shell" aria-labelledby="confirmation-heading">
+    <header class="account-shell__heading">
+        <span class="page-eyebrow">Tek kullanımlık kod</span>
+        <h1 id="confirmation-heading">Hasta hesabını doğrula</h1>
+        <p>Mailpit içindeki MOCK mesajdan kodu kopyalayın. Kod URL’ye yazılmaz.</p>
+    </header>
+
+    <EditForm Model="_model" OnValidSubmit="SubmitAsync" class="account-form">
+        <DataAnnotationsValidator />
+        <ValidationSummary />
+        <label for="confirmation-email">DEMO e-posta</label>
+        <InputText id="confirmation-email" @bind-Value="_model.Email" autocomplete="email" />
+        <label for="confirmation-code">Doğrulama kodu</label>
+        <InputText id="confirmation-code" @bind-Value="_model.Code" autocomplete="one-time-code" />
+        <button class="ui-button ui-button--primary" type="submit" disabled="@_isSubmitting">
+            @(_isSubmitting ? "Doğrulanıyor…" : "Hesabı doğrula")
+        </button>
+    </EditForm>
+
+    @if (_message is not null)
+    {
+        <p class="account-message @(_succeeded ? "account-message--success" : "account-message--error")"
+           role="@(_succeeded ? "status" : "alert")">@_message</p>
+    }
+    <nav class="account-links" aria-label="Hesap işlemleri">
+        <a href="account/login">Giriş yap</a>
+        <a href="account/register">Yeni kod iste</a>
+    </nav>
+</section>
+
+@code {
+    private readonly ConfirmationModel _model = new();
+    private bool _isSubmitting;
+    private bool _succeeded;
+    private string? _message;
+
+    private async Task SubmitAsync()
+    {
+        _isSubmitting = true;
+        try
+        {
+            var result = await Identity.ConfirmPatientEmailAsync(new ConfirmPatientEmailRequest
+            {
+                Email = _model.Email,
+                Code = _model.Code,
+            });
+            _succeeded = result.Succeeded;
+            _message = result.Message;
+        }
+        finally
+        {
+            _model.Code = string.Empty;
+            _isSubmitting = false;
+        }
+    }
+
+    private sealed class ConfirmationModel
+    {
+        [Required(ErrorMessage = "E-posta zorunludur.")]
+        [EmailAddress(ErrorMessage = "Geçerli bir e-posta girin.")]
+        public string Email { get; set; } = string.Empty;
+
+        [Required(ErrorMessage = "Kod zorunludur.")]
+        public string Code { get; set; } = string.Empty;
+    }
+}

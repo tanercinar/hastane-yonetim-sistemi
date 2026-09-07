@@ -1,0 +1,898 @@
+@page "/emergency/encounter/{AdmissionId:guid}"
+@using HospitalManagement.Contracts.Emergency
+@using HospitalManagement.Web.Client.Emergency
+@inject IEmergencyApiClient EmergencyApi
+@inject NavigationManager Navigation
+
+<div class="container-fluid py-3">
+    <!-- Breadcrumb & Nav -->
+    <nav aria-label="breadcrumb" class="mb-3">
+        <ol class="breadcrumb">
+            <li class="breadcrumb-item"><a href="emergency/board"><i class="bi bi-display me-1"></i>Acil Panosu</a></li>
+            <li class="breadcrumb-item"><a href="emergency/admissions">Acil Başvurular</a></li>
+            <li class="breadcrumb-item active" aria-current="page">Klinik Encounter &amp; İstem Akışı</li>
+        </ol>
+    </nav>
+
+    <!-- Loading & Error -->
+    @if (_isLoading)
+    {
+        <div class="text-center py-5">
+            <div class="spinner-border text-danger" role="status">
+                <span class="visually-hidden">Yükleniyor...</span>
+            </div>
+            <p class="text-muted mt-2">Acil encounter verileri yükleniyor...</p>
+        </div>
+    }
+    else if (_admission == null)
+    {
+        <div class="alert alert-danger" role="alert">
+            <i class="bi bi-exclamation-triangle-fill me-2"></i>Acil başvuru kaydı bulunamadı.
+        </div>
+    }
+    else
+    {
+        <!-- Alert Messages -->
+        @if (!string.IsNullOrWhiteSpace(_errorMessage))
+        {
+            <div class="alert alert-danger alert-dismissible fade show" role="alert">
+                <i class="bi bi-exclamation-triangle-fill me-2"></i>@_errorMessage
+                <button type="button" class="btn-close" @onclick="() => _errorMessage = null"></button>
+            </div>
+        }
+        @if (!string.IsNullOrWhiteSpace(_successMessage))
+        {
+            <div class="alert alert-success alert-dismissible fade show" role="alert">
+                <i class="bi bi-check-circle-fill me-2"></i>@_successMessage
+                <button type="button" class="btn-close" @onclick="() => _successMessage = null"></button>
+            </div>
+        }
+
+        <!-- Patient Header Card -->
+        <div class="card border-0 shadow-sm mb-4">
+            <div class="card-body p-4">
+                <div class="d-flex flex-wrap justify-content-between align-items-start gap-3">
+                    <div>
+                        <div class="d-flex align-items-center gap-2 mb-1">
+                            <span class="badge bg-dark font-monospace fs-6">@_admission.EmergencyProtocolNumber</span>
+                            @GetTriageLevelBadge(_admission.Triage?.TriageLevel)
+                            @GetStatusBadge(_admission.Status)
+                        </div>
+                        <h4 class="fw-bold mb-1"><i class="bi bi-person-fill me-1 text-secondary"></i>Hasta ID: <span class="font-monospace">@_admission.PatientId</span></h4>
+                        <p class="text-muted mb-0">
+                            <strong>Geliş Şekli:</strong> @_admission.ArrivalType |
+                            <strong>Başvuru Zamanı:</strong> @_admission.AdmittedAtUtc.ToLocalTime().ToString("g") |
+                            <strong>Alan/Yatak:</strong> @(_admission.AssignedBedOrZone ?? "Atanmadı") |
+                            <strong>Sorumlu Hekim ID:</strong> @(_admission.AssignedDoctorId?.ToString() ?? "Atanmadı")
+                        </p>
+                        <div class="mt-2 p-2 bg-light rounded border">
+                            <strong>Şikâyet:</strong> @_admission.ChiefComplaint
+                            @if (!string.IsNullOrWhiteSpace(_admission.Triage?.TriageCategoryReason))
+                            {
+                                <span class="text-muted ms-2">| <strong>Triyaj Gerekçesi:</strong> @_admission.Triage.TriageCategoryReason</span>
+                            }
+                        </div>
+                    </div>
+                    <div class="text-end">
+                        <a href="emergency/board" class="btn btn-outline-secondary btn-sm">
+                            <i class="bi bi-arrow-left me-1"></i>Panoya Dön
+                        </a>
+                    </div>
+                </div>
+
+                <!-- Vital Signs Bar -->
+                @if (_admission.Triage != null)
+                {
+                    <div class="row g-2 mt-3 pt-3 border-top text-center">
+                        <div class="col-md-2 col-4">
+                            <small class="text-muted d-block">Tansiyon (KB)</small>
+                            <strong>@(_admission.Triage.SystolicBp.HasValue && _admission.Triage.DiastolicBp.HasValue ? $"{_admission.Triage.SystolicBp}/{_admission.Triage.DiastolicBp} mmHg" : "-")</strong>
+                        </div>
+                        <div class="col-md-2 col-4">
+                            <small class="text-muted d-block">Nabız</small>
+                            <strong>@(_admission.Triage.HeartRate.HasValue ? $"{_admission.Triage.HeartRate} bpm" : "-")</strong>
+                        </div>
+                        <div class="col-md-2 col-4">
+                            <small class="text-muted d-block">Ateş</small>
+                            <strong>@(_admission.Triage.BodyTemperatureCelsius.HasValue ? $"{_admission.Triage.BodyTemperatureCelsius} °C" : "-")</strong>
+                        </div>
+                        <div class="col-md-2 col-4">
+                            <small class="text-muted d-block">SpO2</small>
+                            <strong>@(_admission.Triage.OxygenSaturationPercent.HasValue ? $"%{_admission.Triage.OxygenSaturationPercent}" : "-")</strong>
+                        </div>
+                        <div class="col-md-2 col-4">
+                            <small class="text-muted d-block">Solunum</small>
+                            <strong>@(_admission.Triage.RespiratoryRate.HasValue ? $"{_admission.Triage.RespiratoryRate}/dk" : "-")</strong>
+                        </div>
+                        <div class="col-md-2 col-4">
+                            <small class="text-muted d-block">Ağrı Skoru</small>
+                            <strong>@(_admission.Triage.PainScale.HasValue ? $"{_admission.Triage.PainScale}/10" : "-")</strong>
+                        </div>
+                    </div>
+                }
+            </div>
+        </div>
+
+        <!-- Navigation Tabs -->
+        <ul class="nav nav-pills mb-3" role="tablist">
+            <li class="nav-item" role="presentation">
+                <button class="nav-link @(_activeTab == "orders" ? "active bg-danger" : "")" @onclick='() => _activeTab = "orders"'>
+                    <i class="bi bi-card-checklist me-1"></i>Hızlı Tetkik &amp; Tedavi İstemleri (@_orders.Count)
+                </button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link @(_activeTab == "consultations" ? "active bg-danger" : "")" @onclick='() => _activeTab = "consultations"'>
+                    <i class="bi bi-people me-1"></i>Konsültasyonlar (@_consultations.Count)
+                </button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link @(_activeTab == "disposition" ? "active bg-danger" : "")" @onclick='() => _activeTab = "disposition"'>
+                    <i class="bi bi-signpost-2 me-1"></i>Sonlandırma &amp; Disposition Kararı
+                </button>
+            </li>
+        </ul>
+
+        <!-- Tab 1: Orders -->
+        @if (_activeTab == "orders")
+        {
+            <div class="card border-0 shadow-sm mb-4">
+                <div class="card-header bg-white py-3 d-flex justify-content-between align-items-center">
+                    <h5 class="fw-bold mb-0"><i class="bi bi-lightning-charge-fill text-warning me-2"></i>Hızlı Tetkik Paneli &amp; İstemler</h5>
+                    <button class="btn btn-danger btn-sm" @onclick="() => _showNewOrderModal = true">
+                        <i class="bi bi-plus-circle me-1"></i>Yeni İstem Ekle
+                    </button>
+                </div>
+                <div class="card-body p-3">
+                    <!-- Quick Preset Order Buttons -->
+                    <div class="mb-3">
+                        <span class="small fw-bold text-muted text-uppercase d-block mb-2">Acil Hızlı İstem Butonları:</span>
+                        <div class="d-flex flex-wrap gap-2">
+                            <button class="btn btn-outline-primary btn-sm" @onclick='() => QuickAddOrder("Laboratory", "LAB-HEMO", "Hemogram (Tam Kan Sayımı)", "Stat")'>
+                                🩸 Hemogram (STAT)
+                            </button>
+                            <button class="btn btn-outline-primary btn-sm" @onclick='() => QuickAddOrder("Laboratory", "LAB-BIO", "Acil Biyokimya Paneli", "Stat")'>
+                                🧪 Biyokimya Paneli (STAT)
+                            </button>
+                            <button class="btn btn-outline-danger btn-sm" @onclick='() => QuickAddOrder("Laboratory", "LAB-TROP", "Kardiyak Troponin I", "Stat")'>
+                                💓 Troponin I (STAT)
+                            </button>
+                            <button class="btn btn-outline-secondary btn-sm" @onclick='() => QuickAddOrder("Radiology", "RAD-EKG", "12 Derivasyonlu EKG", "Stat")'>
+                                📈 EKG (STAT)
+                            </button>
+                            <button class="btn btn-outline-info btn-sm" @onclick='() => QuickAddOrder("Radiology", "RAD-XRAY-PA", "PA Akciğer Grafisi", "Urgent")'>
+                                🩻 PA Akciğer Grafisi
+                            </button>
+                            <button class="btn btn-outline-info btn-sm" @onclick='() => QuickAddOrder("Radiology", "RAD-CT-CHEST", "Toraks BT (Kontrastsız)", "Stat")'>
+                                🖥️ Toraks BT
+                            </button>
+                            <button class="btn btn-outline-success btn-sm" @onclick='() => QuickAddOrder("Medication", "MED-SALIN", "%0.9 SF 1000ml IV İnfüzyon", "Stat")'>
+                                💧 %0.9 SF 1000ml IV
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Orders Table -->
+                    @if (_orders.Count == 0)
+                    {
+                        <div class="text-center py-4 text-muted">
+                            <i class="bi bi-journal-x fs-2 d-block mb-2"></i>
+                            Henüz verilmiş bir acil istemi bulunmuyor.
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="table-responsive">
+                            <table class="table table-hover align-middle mb-0">
+                                <thead class="table-light">
+                                    <tr>
+                                        <th>Tür</th>
+                                        <th>Katalog Kodu</th>
+                                        <th>İstem Adı</th>
+                                        <th>Öncelik</th>
+                                        <th>İstem Zamanı</th>
+                                        <th>Durum</th>
+                                        <th>Sonuç / Not</th>
+                                        <th class="text-end">İşlemler</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var order in _orders)
+                                    {
+                                        <tr>
+                                            <td><span class="badge bg-light text-dark border">@order.OrderType</span></td>
+                                            <td class="font-monospace small">@order.OrderCatalogCode</td>
+                                            <td class="fw-bold">@order.OrderCatalogName</td>
+                                            <td>
+                                                <span class="badge @(order.Priority == "Stat" ? "bg-danger" : order.Priority == "Urgent" ? "bg-warning text-dark" : "bg-secondary")">
+                                                    @order.Priority
+                                                </span>
+                                            </td>
+                                            <td class="small text-muted">@order.OrderedAtUtc.ToLocalTime().ToString("t")</td>
+                                            <td>
+                                                <span class="badge @(order.Status == "Completed" ? "bg-success" : order.Status == "Cancelled" ? "bg-secondary" : "bg-warning text-dark")">
+                                                    @order.Status
+                                                </span>
+                                            </td>
+                                            <td>
+                                                @if (!string.IsNullOrWhiteSpace(order.ResultSummary))
+                                                {
+                                                    <span class="badge bg-success-subtle text-success border border-success">@order.ResultSummary</span>
+                                                }
+                                                else if (!string.IsNullOrWhiteSpace(order.CancellationReason))
+                                                {
+                                                    <small class="text-danger">İptal: @order.CancellationReason</small>
+                                                }
+                                                else
+                                                {
+                                                    <span class="text-muted small">Bekleniyor...</span>
+                                                }
+                                            </td>
+                                            <td class="text-end">
+                                                @if (order.Status == "Ordered" || order.Status == "InProgress")
+                                                {
+                                                    <div class="btn-group btn-group-sm">
+                                                        <button class="btn btn-outline-success" @onclick="() => OpenCompleteOrderModal(order.Id)" title="Sonuçlandır">
+                                                            <i class="bi bi-check2-circle"></i> Sonuç
+                                                        </button>
+                                                        <button class="btn btn-outline-danger" @onclick="() => OpenCancelOrderModal(order.Id)" title="İptal Et">
+                                                            <i class="bi bi-x-circle"></i>
+                                                        </button>
+                                                    </div>
+                                                }
+                                            </td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    }
+                </div>
+            </div>
+        }
+
+        <!-- Tab 2: Consultations -->
+        @if (_activeTab == "consultations")
+        {
+            <div class="card border-0 shadow-sm mb-4">
+                <div class="card-header bg-white py-3 d-flex justify-content-between align-items-center">
+                    <h5 class="fw-bold mb-0"><i class="bi bi-people-fill text-info me-2"></i>Acil Konsültasyon İstekleri</h5>
+                    <button class="btn btn-info text-white btn-sm" @onclick="() => _showNewConsultationModal = true">
+                        <i class="bi bi-plus-circle me-1"></i>Konsültasyon İste
+                    </button>
+                </div>
+                <div class="card-body p-3">
+                    @if (_consultations.Count == 0)
+                    {
+                        <div class="text-center py-4 text-muted">
+                            <i class="bi bi-person-x fs-2 d-block mb-2"></i>
+                            Henüz istenen bir konsültasyon bulunmuyor.
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="table-responsive">
+                            <table class="table table-hover align-middle mb-0">
+                                <thead class="table-light">
+                                    <tr>
+                                        <th>Bölüm / Branş</th>
+                                        <th>Aciliyet</th>
+                                        <th>Klinik Gerekçe</th>
+                                        <th>İstek Zamanı</th>
+                                        <th>Durum</th>
+                                        <th>Konsültan Yanıtı</th>
+                                        <th class="text-end">İşlemler</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var c in _consultations)
+                                    {
+                                        <tr>
+                                            <td class="fw-bold">@c.DepartmentName</td>
+                                            <td>
+                                                <span class="badge @(c.Urgency == "Immediate15Min" ? "bg-danger" : c.Urgency == "Urgent60Min" ? "bg-warning text-dark" : "bg-secondary")">
+                                                    @c.Urgency
+                                                </span>
+                                            </td>
+                                            <td>@c.ClinicalReason</td>
+                                            <td class="small text-muted">@c.RequestedAtUtc.ToLocalTime().ToString("t")</td>
+                                            <td>
+                                                <span class="badge @(c.Status == "Completed" ? "bg-success" : c.Status == "Accepted" ? "bg-primary" : c.Status == "Cancelled" ? "bg-secondary" : "bg-warning text-dark")">
+                                                    @c.Status
+                                                </span>
+                                            </td>
+                                            <td>
+                                                @if (!string.IsNullOrWhiteSpace(c.ConsultationResponseNotes))
+                                                {
+                                                    <div class="p-2 bg-light rounded small border">
+                                                        <i class="bi bi-chat-dots me-1 text-primary"></i>@c.ConsultationResponseNotes
+                                                    </div>
+                                                }
+                                                else
+                                                {
+                                                    <span class="text-muted small">Yanıt bekleniyor</span>
+                                                }
+                                            </td>
+                                            <td class="text-end">
+                                                @if (c.Status == "Requested")
+                                                {
+                                                    <button class="btn btn-outline-primary btn-sm me-1" @onclick="() => AcceptConsultationAsync(c.Id)">
+                                                        Kabul Et
+                                                    </button>
+                                                    <button class="btn btn-outline-success btn-sm" @onclick="() => OpenRespondConsultationModal(c.Id)">
+                                                        Yanıtla
+                                                    </button>
+                                                }
+                                                else if (c.Status == "Accepted")
+                                                {
+                                                    <button class="btn btn-outline-success btn-sm" @onclick="() => OpenRespondConsultationModal(c.Id)">
+                                                        Yanıtla
+                                                    </button>
+                                                }
+                                            </td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    }
+                </div>
+            </div>
+        }
+
+        <!-- Tab 3: Disposition -->
+        @if (_activeTab == "disposition")
+        {
+            <div class="card border-0 shadow-sm mb-4">
+                <div class="card-header bg-white py-3">
+                    <h5 class="fw-bold mb-0"><i class="bi bi-signpost-split text-success me-2"></i>Acil Sonlandırma &amp; Disposition Kararı</h5>
+                </div>
+                <div class="card-body p-4">
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <label class="form-label fw-bold">Disposition Türü <span class="text-danger">*</span></label>
+                            <select class="form-select" @bind="_dispositionRequest.DispositionType">
+                                <option value="DischargeHome">🏠 Şifa ile Eve Taburcu (DischargeHome)</option>
+                                <option value="AdmitToWard">🏥 Yatan Hasta Servisine Yatış (AdmitToWard)</option>
+                                <option value="AdmitToIcu">🚨 Yoğun Bakım Ünitesine Yatış (AdmitToIcu)</option>
+                                <option value="DirectToSurgery">🔪 Doğrudan Ameliyathaneye Sevk (DirectToSurgery)</option>
+                                <option value="TransferToOtherHospital">🚑 Dış Merkeze Sevk (TransferToOtherHospital)</option>
+                                <option value="Exitus">⚫ Exitus (Morg)</option>
+                            </select>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label fw-bold">Hedef Servis / Branş Adı</label>
+                            <input type="text" class="form-control" @bind="_dispositionRequest.TargetDepartmentName"
+                                   placeholder="Örn: Kardiyoloji Servisi, Koroner Yoğun Bakım" />
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label fw-bold">Klinik Karar Özeti / Acil Epikriz Notu <span class="text-danger">*</span></label>
+                            <textarea class="form-control" rows="4" @bind="_dispositionRequest.DispositionSummaryNotes"
+                                      placeholder="Acil müdahale, tetkik sonuçları, klinik seyir ve taburculuk/yatış kararı özeti..."></textarea>
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label fw-bold">Taburculuk / Takip Önerileri (Reçete &amp; Kontrol)</label>
+                            <textarea class="form-control" rows="3" @bind="_dispositionRequest.FollowUpInstructions"
+                                      placeholder="Hastaya verilen öneriler, poliklinik kontrol zamanı vb..."></textarea>
+                        </div>
+                    </div>
+                    <div class="mt-4 pt-3 border-top text-end">
+                        <button class="btn btn-success px-4 fw-bold" @onclick="SubmitDispositionAsync" disabled="@_isSubmitting">
+                            @if (_isSubmitting)
+                            {
+                                <span class="spinner-border spinner-border-sm me-1"></span>
+                            }
+                            <i class="bi bi-check2-circle me-1"></i>Disposition Kararını Kaydet &amp; Sonlandır
+                        </button>
+                    </div>
+                </div>
+            </div>
+        }
+    }
+</div>
+
+<!-- Modal: Yeni İstem -->
+@if (_showNewOrderModal)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content border-0 shadow">
+                <div class="modal-header bg-danger text-white">
+                    <h5 class="modal-title"><i class="bi bi-plus-circle me-2"></i>Yeni Acil İstemi</h5>
+                    <button type="button" class="btn-close btn-close-white" @onclick="() => _showNewOrderModal = false"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">İstem Türü</label>
+                        <select class="form-select" @bind="_newOrderRequest.OrderType">
+                            <option value="Laboratory">Laboratuvar</option>
+                            <option value="Radiology">Radyoloji</option>
+                            <option value="Medication">İlaç / Serum</option>
+                            <option value="NursingCare">Hemşirelik Bakımı</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">Katalog Kodu</label>
+                        <input type="text" class="form-control font-monospace" @bind="_newOrderRequest.OrderCatalogCode" placeholder="Örn: LAB-BIO-01" />
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">İstem Adı</label>
+                        <input type="text" class="form-control" @bind="_newOrderRequest.OrderCatalogName" placeholder="Örn: Tam Biyokimya Paneli" />
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">Öncelik</label>
+                        <select class="form-select" @bind="_newOrderRequest.Priority">
+                            <option value="Stat">Stat (Acil / Kritik)</option>
+                            <option value="Urgent">Urgent (Öncelikli)</option>
+                            <option value="Routine">Routine (Rutin)</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Klinik Talimat</label>
+                        <input type="text" class="form-control" @bind="_newOrderRequest.ClinicalInstructions" />
+                    </div>
+                </div>
+                <div class="modal-footer bg-light">
+                    <button type="button" class="btn btn-secondary" @onclick="() => _showNewOrderModal = false">Vazgeç</button>
+                    <button type="button" class="btn btn-danger" @onclick="SubmitNewOrderAsync" disabled="@_isSubmitting">İstemi Ver</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+<!-- Modal: İstem Sonuçlandır -->
+@if (_showCompleteOrderModal)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content border-0 shadow">
+                <div class="modal-header bg-success text-white">
+                    <h5 class="modal-title"><i class="bi bi-check2-circle me-2"></i>İstem Sonuçlandır</h5>
+                    <button type="button" class="btn-close btn-close-white" @onclick="() => _showCompleteOrderModal = false"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">Sonuç Özeti / Bulgular</label>
+                        <input type="text" class="form-control" @bind="_completeOrderRequest.ResultSummary" placeholder="Örn: Normal sinüs ritmi, ST elevasyonu yok" />
+                    </div>
+                </div>
+                <div class="modal-footer bg-light">
+                    <button type="button" class="btn btn-secondary" @onclick="() => _showCompleteOrderModal = false">Vazgeç</button>
+                    <button type="button" class="btn btn-success" @onclick="SubmitCompleteOrderAsync" disabled="@_isSubmitting">Kaydet</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+<!-- Modal: İstem İptal -->
+@if (_showCancelOrderModal)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content border-0 shadow">
+                <div class="modal-header bg-danger text-white">
+                    <h5 class="modal-title"><i class="bi bi-x-circle me-2"></i>İstemi İptal Et</h5>
+                    <button type="button" class="btn-close btn-close-white" @onclick="() => _showCancelOrderModal = false"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">İptal Gerekçesi</label>
+                        <input type="text" class="form-control" @bind="_cancelOrderRequest.Reason" placeholder="Örn: Mükerrer istem" />
+                    </div>
+                </div>
+                <div class="modal-footer bg-light">
+                    <button type="button" class="btn btn-secondary" @onclick="() => _showCancelOrderModal = false">Vazgeç</button>
+                    <button type="button" class="btn btn-danger" @onclick="SubmitCancelOrderAsync" disabled="@_isSubmitting">İptal Et</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+<!-- Modal: Yeni Konsültasyon -->
+@if (_showNewConsultationModal)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content border-0 shadow">
+                <div class="modal-header bg-info text-white">
+                    <h5 class="modal-title"><i class="bi bi-people me-2"></i>Yeni Konsültasyon İstemi</h5>
+                    <button type="button" class="btn-close btn-close-white" @onclick="() => _showNewConsultationModal = false"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">Konsültasyon Bölümü / Branş</label>
+                        <select class="form-select" @onchange="OnDepartmentSelected">
+                            <option value="">-- Bölüm Seçin --</option>
+                            <option value="00000000-0000-0000-0000-000000000001|Kardiyoloji">Kardiyoloji</option>
+                            <option value="30000000-0000-0000-0000-000000000009|DEMO Genel Cerrahi Bölümü">Genel Cerrahi</option>
+                            <option value="00000000-0000-0000-0000-000000000003|Nöroloji">Nöroloji</option>
+                            <option value="00000000-0000-0000-0000-000000000004|Anesteziyoloji & Reanimasyon">Anesteziyoloji &amp; Reanimasyon</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">Aciliyet</label>
+                        <select class="form-select" @bind="_newConsultationRequest.Urgency">
+                            <option value="Immediate15Min">🔴 Acil (15 dk içinde)</option>
+                            <option value="Urgent60Min">🟡 Öncelikli (60 dk içinde)</option>
+                            <option value="Routine">🟢 Rutin</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">Klinik Gerekçe &amp; Danışılan Soru</label>
+                        <textarea class="form-control" rows="3" @bind="_newConsultationRequest.ClinicalReason" placeholder="Hasta kliniği ve danışılan soru..."></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer bg-light">
+                    <button type="button" class="btn btn-secondary" @onclick="() => _showNewConsultationModal = false">Vazgeç</button>
+                    <button type="button" class="btn btn-info text-white" @onclick="SubmitNewConsultationAsync" disabled="@_isSubmitting">Konsültasyon İste</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+<!-- Modal: Konsültasyon Yanıtla -->
+@if (_showRespondConsultationModal)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content border-0 shadow">
+                <div class="modal-header bg-success text-white">
+                    <h5 class="modal-title"><i class="bi bi-chat-dots me-2"></i>Konsültasyon Yanıtı</h5>
+                    <button type="button" class="btn-close btn-close-white" @onclick="() => _showRespondConsultationModal = false"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">Klinik Değerlendirme &amp; Tedavi Önerileri</label>
+                        <textarea class="form-control" rows="4" @bind="_respondConsultationRequest.ResponseNotes" placeholder="Konsültan hekim muayene bulguları ve tedavi önerileri..."></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer bg-light">
+                    <button type="button" class="btn btn-secondary" @onclick="() => _showRespondConsultationModal = false">Vazgeç</button>
+                    <button type="button" class="btn btn-success" @onclick="SubmitRespondConsultationAsync" disabled="@_isSubmitting">Yanıtı Gönder</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter]
+    public Guid AdmissionId { get; set; }
+
+    private bool _isLoading = true;
+    private bool _isSubmitting;
+    private string? _errorMessage;
+    private string? _successMessage;
+    private string _activeTab = "orders";
+
+    private EmergencyAdmissionResponse? _admission;
+    private List<EmergencyOrderResponse> _orders = [];
+    private List<EmergencyConsultationResponse> _consultations = [];
+
+    private bool _showNewOrderModal;
+    private bool _showCompleteOrderModal;
+    private bool _showCancelOrderModal;
+    private Guid _targetOrderId;
+
+    private CreateEmergencyOrderRequest _newOrderRequest = new(Guid.Empty, "Laboratory", "LAB-HEMO", "Hemogram", "Stat", null);
+    private CompleteEmergencyOrderRequest _completeOrderRequest = new(null);
+    private CancelEmergencyOrderRequest _cancelOrderRequest = new("Klinik gerek kalmadı");
+
+    private bool _showNewConsultationModal;
+    private bool _showRespondConsultationModal;
+    private Guid _targetConsultationId;
+
+    private RequestEmergencyConsultationRequest _newConsultationRequest = new(Guid.Empty, Guid.Empty, string.Empty, "Immediate15Min", string.Empty);
+    private RespondEmergencyConsultationRequest _respondConsultationRequest = new(string.Empty);
+
+    private RecordEmergencyDispositionRequest _dispositionRequest = new("DischargeHome", null, null, "Acil takip ve tedavi tamamlandı, stabil.", "3 gün sonra poliklinik kontrolü.");
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadDataAsync();
+    }
+
+    private async Task LoadDataAsync()
+    {
+        _isLoading = true;
+        _errorMessage = null;
+        try
+        {
+            _admission = await EmergencyApi.GetAdmissionByIdAsync(AdmissionId);
+            if (_admission != null)
+            {
+                _orders = await EmergencyApi.GetOrdersByAdmissionIdAsync(AdmissionId);
+                _consultations = await EmergencyApi.GetConsultationsByAdmissionIdAsync(AdmissionId);
+            }
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"Veriler yüklenirken hata: {ex.Message}";
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+    }
+
+    private async Task QuickAddOrder(string orderType, string catalogCode, string catalogName, string priority)
+    {
+        _isSubmitting = true;
+        _errorMessage = null;
+        try
+        {
+            var req = new CreateEmergencyOrderRequest(AdmissionId, orderType, catalogCode, catalogName, priority, null);
+            var res = await EmergencyApi.CreateOrderAsync(req);
+            if (res != null)
+            {
+                _successMessage = $"{catalogName} istemi başarıyla oluşturuldu.";
+                _orders = await EmergencyApi.GetOrdersByAdmissionIdAsync(AdmissionId);
+            }
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"Hızlı istem hatası: {ex.Message}";
+        }
+        finally
+        {
+            _isSubmitting = false;
+        }
+    }
+
+    private async Task SubmitNewOrderAsync()
+    {
+        _isSubmitting = true;
+        _errorMessage = null;
+        try
+        {
+            _newOrderRequest.AdmissionId = AdmissionId;
+            var res = await EmergencyApi.CreateOrderAsync(_newOrderRequest);
+            if (res != null)
+            {
+                _successMessage = "Yeni istem eklendi.";
+                _showNewOrderModal = false;
+                _orders = await EmergencyApi.GetOrdersByAdmissionIdAsync(AdmissionId);
+            }
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"İstem ekleme hatası: {ex.Message}";
+        }
+        finally
+        {
+            _isSubmitting = false;
+        }
+    }
+
+    private void OpenCompleteOrderModal(Guid orderId)
+    {
+        _targetOrderId = orderId;
+        _completeOrderRequest = new CompleteEmergencyOrderRequest("Sonuçlar normal referans aralığında.");
+        _showCompleteOrderModal = true;
+    }
+
+    private async Task SubmitCompleteOrderAsync()
+    {
+        _isSubmitting = true;
+        _errorMessage = null;
+        try
+        {
+            var res = await EmergencyApi.CompleteOrderAsync(_targetOrderId, _completeOrderRequest);
+            if (res != null)
+            {
+                _successMessage = "İstem sonuçlandırıldı.";
+                _showCompleteOrderModal = false;
+                _orders = await EmergencyApi.GetOrdersByAdmissionIdAsync(AdmissionId);
+            }
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"Sonuçlandırma hatası: {ex.Message}";
+        }
+        finally
+        {
+            _isSubmitting = false;
+        }
+    }
+
+    private void OpenCancelOrderModal(Guid orderId)
+    {
+        _targetOrderId = orderId;
+        _cancelOrderRequest = new CancelEmergencyOrderRequest("Gerek kalmadı.");
+        _showCancelOrderModal = true;
+    }
+
+    private async Task SubmitCancelOrderAsync()
+    {
+        _isSubmitting = true;
+        _errorMessage = null;
+        try
+        {
+            var res = await EmergencyApi.CancelOrderAsync(_targetOrderId, _cancelOrderRequest);
+            if (res != null)
+            {
+                _successMessage = "İstem iptal edildi.";
+                _showCancelOrderModal = false;
+                _orders = await EmergencyApi.GetOrdersByAdmissionIdAsync(AdmissionId);
+            }
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"İptal hatası: {ex.Message}";
+        }
+        finally
+        {
+            _isSubmitting = false;
+        }
+    }
+
+    private void OnDepartmentSelected(ChangeEventArgs e)
+    {
+        var val = e.Value?.ToString();
+        if (!string.IsNullOrWhiteSpace(val) && val.Contains('|'))
+        {
+            var parts = val.Split('|');
+            if (Guid.TryParse(parts[0], out var deptId))
+            {
+                _newConsultationRequest.DepartmentId = deptId;
+                _newConsultationRequest.DepartmentName = parts[1];
+            }
+        }
+    }
+
+    private async Task SubmitNewConsultationAsync()
+    {
+        if (_newConsultationRequest.DepartmentId == Guid.Empty)
+        {
+            _errorMessage = "Lütfen konsültasyon bölümü seçin.";
+            return;
+        }
+
+        _isSubmitting = true;
+        _errorMessage = null;
+        try
+        {
+            _newConsultationRequest.AdmissionId = AdmissionId;
+            var res = await EmergencyApi.RequestConsultationAsync(_newConsultationRequest);
+            if (res != null)
+            {
+                _successMessage = "Konsültasyon isteği iletildi.";
+                _showNewConsultationModal = false;
+                _consultations = await EmergencyApi.GetConsultationsByAdmissionIdAsync(AdmissionId);
+            }
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"Konsültasyon hatası: {ex.Message}";
+        }
+        finally
+        {
+            _isSubmitting = false;
+        }
+    }
+
+    private async Task AcceptConsultationAsync(Guid id)
+    {
+        _isSubmitting = true;
+        _errorMessage = null;
+        try
+        {
+            var res = await EmergencyApi.AcceptConsultationAsync(id);
+            if (res != null)
+            {
+                _successMessage = "Konsültasyon kabul edildi.";
+                _consultations = await EmergencyApi.GetConsultationsByAdmissionIdAsync(AdmissionId);
+            }
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"Kabul hatası: {ex.Message}";
+        }
+        finally
+        {
+            _isSubmitting = false;
+        }
+    }
+
+    private void OpenRespondConsultationModal(Guid id)
+    {
+        _targetConsultationId = id;
+        _respondConsultationRequest = new RespondEmergencyConsultationRequest("Hasta değerlendirildi; acil cerrahi endikasyon saptanmadı.");
+        _showRespondConsultationModal = true;
+    }
+
+    private async Task SubmitRespondConsultationAsync()
+    {
+        _isSubmitting = true;
+        _errorMessage = null;
+        try
+        {
+            var res = await EmergencyApi.RespondConsultationAsync(_targetConsultationId, _respondConsultationRequest);
+            if (res != null)
+            {
+                _successMessage = "Konsültasyon yanıtı kaydedildi.";
+                _showRespondConsultationModal = false;
+                _consultations = await EmergencyApi.GetConsultationsByAdmissionIdAsync(AdmissionId);
+            }
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"Yanıt hatası: {ex.Message}";
+        }
+        finally
+        {
+            _isSubmitting = false;
+        }
+    }
+
+    private async Task SubmitDispositionAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_dispositionRequest.DispositionSummaryNotes))
+        {
+            _errorMessage = "Lütfen disposition klinik özet notunu girin.";
+            return;
+        }
+
+        _isSubmitting = true;
+        _errorMessage = null;
+        try
+        {
+            var res = await EmergencyApi.RecordDispositionAsync(AdmissionId, _dispositionRequest);
+            if (res != null)
+            {
+                _successMessage = "Disposition kararı kaydedildi ve acil başvurusu sonlandırıldı.";
+                await LoadDataAsync();
+            }
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"Disposition kaydetme hatası: {ex.Message}";
+        }
+        finally
+        {
+            _isSubmitting = false;
+        }
+    }
+
+    private static RenderFragment GetTriageLevelBadge(string? level) => builder =>
+    {
+        var (css, label) = level switch
+        {
+            "Red1Resuscitation" or "Red1_Resuscitation" => ("bg-danger text-white", "🔴 Kırmızı 1"),
+            "Red2Emergency" or "Red2_Emergency" => ("bg-danger text-white", "🔴 Kırmızı 2"),
+            "YellowUrgent" or "Yellow_Urgent" => ("bg-warning text-dark", "🟡 Sarı"),
+            "GreenStandard" or "Green_Standard" => ("bg-success text-white", "🟢 Yeşil"),
+            "BlackExpectant" or "Black_Expectant" => ("bg-dark text-white", "⚫ Siyah"),
+            _ => ("bg-secondary-subtle text-secondary border", "Bekliyor"),
+        };
+
+        builder.OpenElement(0, "span");
+        builder.AddAttribute(1, "class", $"badge {css}");
+        builder.AddContent(2, label);
+        builder.CloseElement();
+    };
+
+    private static RenderFragment GetStatusBadge(string status) => builder =>
+    {
+        var (css, label) = status switch
+        {
+            "WaitingTriage" => ("bg-warning-subtle text-warning-emphasis border border-warning", "Triyaj Bekliyor"),
+            "TriagedWaitingDoctor" => ("bg-info-subtle text-info-emphasis border border-info", "Hekim Bekliyor"),
+            "InEvaluation" => ("bg-primary-subtle text-primary border border-primary", "Değerlendirmede"),
+            "InObservation" => ("bg-secondary-subtle text-secondary border border-secondary", "Gözlemde"),
+            "AdmittedToInpatient" => ("bg-success-subtle text-success border border-success", "Servise Yatırıldı"),
+            "AdmittedToIcu" => ("bg-danger-subtle text-danger border border-danger", "Yoğun Bakıma Yatırıldı"),
+            "Discharged" => ("bg-success text-white", "Taburcu Edildi"),
+            "TransferredOut" => ("bg-info text-white", "Sevk Edildi"),
+            _ => ("bg-light text-dark", status),
+        };
+
+        builder.OpenElement(0, "span");
+        builder.AddAttribute(1, "class", $"badge {css}");
+        builder.AddContent(2, label);
+        builder.CloseElement();
+    };
+}

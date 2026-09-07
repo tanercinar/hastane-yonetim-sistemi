@@ -1,0 +1,439 @@
+@page "/inpatient/discharges"
+@using HospitalManagement.Contracts.Inpatient
+@using HospitalManagement.Web.Client.Inpatient
+@inject IInpatientApiClient InpatientApi
+
+<div class="container-fluid py-3">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <div>
+            <h2 class="fw-bold mb-0">Taburculuk ve Sevk İşlemleri</h2>
+            <p class="text-muted mb-0">Yatan hasta taburculuk özeti, epikriz kaydı, kontrol randevusu ve kurum dışı sevk yönetimi.</p>
+        </div>
+        <div class="d-flex gap-2">
+            <button class="btn btn-outline-primary" @onclick="RefreshDataAsync">
+                <i class="bi bi-arrow-clockwise me-1"></i> Yenile
+            </button>
+        </div>
+    </div>
+
+    @if (!string.IsNullOrWhiteSpace(_successMessage))
+    {
+        <div class="alert alert-success alert-dismissible fade show" role="alert">
+            <i class="bi bi-check-circle-fill me-2"></i>@_successMessage
+            <button type="button" class="btn-close" @onclick="() => _successMessage = null"></button>
+        </div>
+    }
+
+    @if (!string.IsNullOrWhiteSpace(_errorMessage))
+    {
+        <div class="alert alert-danger alert-dismissible fade show" role="alert">
+            <i class="bi bi-exclamation-triangle-fill me-2"></i>@_errorMessage
+            <button type="button" class="btn-close" @onclick="() => _errorMessage = null"></button>
+        </div>
+    }
+
+    <!-- Sekmeler -->
+    <ul class="nav nav-pills mb-4">
+        <li class="nav-item">
+            <button class="nav-link @(_activeTab == "active" ? "active" : "")" @onclick='() => _activeTab = "active"'>
+                <i class="bi bi-person-check me-1"></i> Yatan Hastalar &amp; Taburculuk İşlemleri (@_activeAdmissions.Count)
+            </button>
+        </li>
+        <li class="nav-item">
+            <button class="nav-link @(_activeTab == "history" ? "active" : "")" @onclick='() => _activeTab = "history"'>
+                <i class="bi bi-journal-text me-1"></i> Taburculuk &amp; Sevk Geçmişi (@_pastDischarges.Count)
+            </button>
+        </li>
+    </ul>
+
+    @if (_isLoading)
+    {
+        <div class="text-center py-5">
+            <div class="spinner-border text-primary" role="status">
+                <span class="visually-hidden">Yükleniyor...</span>
+            </div>
+            <p class="text-muted mt-2">Taburculuk verileri yükleniyor...</p>
+        </div>
+    }
+    else if (_activeTab == "active")
+    {
+        @if (_activeAdmissions.Count == 0)
+        {
+            <div class="alert alert-info">Şu anda taburculuk işlemi yapılabilecek aktif yatan hasta bulunmamaktadır.</div>
+        }
+        else
+        {
+            <div class="card shadow-sm border-0">
+                <div class="table-responsive">
+                    <table class="table table-hover align-middle mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Yatış No</th>
+                                <th>Hasta ID</th>
+                                <th>Servis / Yatak</th>
+                                <th>Yatış Tanısı</th>
+                                <th>Yatış Tarihi</th>
+                                <th>Diyet / İzolasyon</th>
+                                <th class="text-end">İşlem</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var adm in _activeAdmissions)
+                            {
+                                <tr>
+                                    <td class="fw-bold text-primary">@adm.AdmissionNumber</td>
+                                    <td>@adm.PatientId.ToString().Substring(0, 8)</td>
+                                    <td>
+                                        <span class="badge bg-light text-dark border">@adm.WardName</span>
+                                        <span class="badge bg-secondary ms-1">@adm.BedNumber</span>
+                                    </td>
+                                    <td>@adm.AdmissionReason</td>
+                                    <td>@adm.AdmittedAtUtc?.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</td>
+                                    <td>
+                                        <span class="badge bg-info text-dark">@adm.DietType</span>
+                                        @if (adm.IsolationRequired != "None")
+                                        {
+                                            <span class="badge bg-warning text-dark ms-1">@adm.IsolationRequired</span>
+                                        }
+                                    </td>
+                                    <td class="text-end">
+                                        <button class="btn btn-primary btn-sm" @onclick="() => OpenDischargeModal(adm)">
+                                            <i class="bi bi-box-arrow-right me-1"></i> Taburcu Et / Sevk
+                                        </button>
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        }
+    }
+    else if (_activeTab == "history")
+    {
+        @if (_pastDischarges.Count == 0)
+        {
+            <div class="alert alert-info">Henüz tamamlanmış taburculuk veya sevk kaydı bulunmamaktadır.</div>
+        }
+        else
+        {
+            <div class="card shadow-sm border-0">
+                <div class="table-responsive">
+                    <table class="table table-hover align-middle mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Hasta ID</th>
+                                <th>Taburculuk Türü</th>
+                                <th>Kesin Tanı</th>
+                                <th>Taburculuk Tarihi</th>
+                                <th>Hedef Kurum (Sevk)</th>
+                                <th class="text-end">Detay</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var d in _pastDischarges)
+                            {
+                                <tr>
+                                    <td class="fw-bold">@d.PatientId.ToString().Substring(0, 8)</td>
+                                    <td>
+                                        @if (d.DischargeType == "Home")
+                                        {
+                                            <span class="badge bg-success">Ev (Şifa/Düzelme)</span>
+                                        }
+                                        else if (d.DischargeType == "TransferToOtherFacility")
+                                        {
+                                            <span class="badge bg-primary">Kurum Dışı Sevk</span>
+                                        }
+                                        else if (d.DischargeType == "AgainstMedicalAdvice")
+                                        {
+                                            <span class="badge bg-warning text-dark">İmza ile Ayrılış</span>
+                                        }
+                                        else
+                                        {
+                                            <span class="badge bg-dark">Ex (Vefat)</span>
+                                        }
+                                    </td>
+                                    <td><strong>@d.FinalDiagnosisCode</strong> - @d.FinalDiagnosisDescription</td>
+                                    <td>@d.DischargedAtUtc.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</td>
+                                    <td>
+                                        @if (!string.IsNullOrWhiteSpace(d.TransferFacilityName))
+                                        {
+                                            <span class="text-primary fw-semibold"><i class="bi bi-building me-1"></i>@d.TransferFacilityName</span>
+                                        }
+                                        else
+                                        {
+                                            <span class="text-muted">-</span>
+                                        }
+                                    </td>
+                                    <td class="text-end">
+                                        <button class="btn btn-outline-secondary btn-sm" @onclick="() => OpenSummaryModal(d)">
+                                            <i class="bi bi-file-earmark-medical me-1"></i> Epikriz
+                                        </button>
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        }
+    }
+</div>
+
+<!-- Modal: Taburculuk ve Sevk Formu -->
+@if (_showDischargeModal && _selectedAdmission != null)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
+            <div class="modal-content border-0 shadow">
+                <div class="modal-header bg-primary text-white">
+                    <h5 class="modal-title"><i class="bi bi-box-arrow-right me-2"></i>Hasta Taburculuk ve Sevk Formu</h5>
+                    <button type="button" class="btn-close btn-close-white" @onclick="() => _showDischargeModal = false"></button>
+                </div>
+                <div class="modal-body">
+                    <!-- Hasta Özeti -->
+                    <div class="alert alert-light border mb-3">
+                        <div class="row g-2">
+                            <div class="col-md-6">
+                                <strong>Yatış No:</strong> @_selectedAdmission.AdmissionNumber<br />
+                                <strong>Servis / Yatak:</strong> @_selectedAdmission.WardName - @_selectedAdmission.BedNumber
+                            </div>
+                            <div class="col-md-6">
+                                <strong>Yatış Nedeni:</strong> @_selectedAdmission.AdmissionReason<br />
+                                <strong>Yatış Tarihi:</strong> @_selectedAdmission.AdmittedAtUtc?.ToLocalTime().ToString("dd.MM.yyyy HH:mm")
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="row g-3 mb-3">
+                        <div class="col-md-6">
+                            <label class="form-label fw-semibold">Taburculuk / Ayrılış Türü:</label>
+                            <select class="form-select" @bind="_dischargeType">
+                                <option value="Home">Ev (Şifa / Düzelme ile Taburcu)</option>
+                                <option value="TransferToOtherFacility">Kurum Dışı Sevk (Mock Sevk Kaydı)</option>
+                                <option value="AgainstMedicalAdvice">Tıbbi Tavsiye Karşıtı (Kendi İsteği/İmza ile)</option>
+                                <option value="Deceased">Ex (Vefat)</option>
+                            </select>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label fw-semibold">Kontrol Randevusu Tarihi:</label>
+                            <input type="datetime-local" class="form-control" @bind="_followUpDate" />
+                        </div>
+                    </div>
+
+                    @if (_dischargeType == "TransferToOtherFacility")
+                    {
+                        <div class="card p-3 mb-3 bg-light border-primary">
+                            <h6 class="fw-bold text-primary mb-2"><i class="bi bi-building me-1"></i>Kurum Dışı Sevk Detayları (MOCK Entegrasyon):</h6>
+                            <div class="row g-2">
+                                <div class="col-md-6">
+                                    <label class="form-label fw-semibold">Sevk Edilen Sağlık Kuruluşu Adı:</label>
+                                    <input type="text" class="form-control" @bind="_transferFacilityName" placeholder="Örn: DEMO-Şehir Eğitim ve Araştırma Hastanesi" />
+                                </div>
+                                <div class="col-md-6">
+                                    <label class="form-label fw-semibold">Sevk Gerekçesi &amp; Nakil Notu:</label>
+                                    <input type="text" class="form-control" @bind="_transferReason" placeholder="Örn: İleri kardiyak girişim ve yoğun bakım ihtiyacı" />
+                                </div>
+                            </div>
+                        </div>
+                    }
+
+                    <div class="row g-2 mb-3">
+                        <div class="col-md-4">
+                            <label class="form-label fw-semibold">Kesin Tanı Kodu (ICD-10):</label>
+                            <input type="text" class="form-control" @bind="_finalDiagCode" placeholder="Örn: I25.1" />
+                        </div>
+                        <div class="col-md-8">
+                            <label class="form-label fw-semibold">Kesin Tanı Açıklaması:</label>
+                            <input type="text" class="form-control" @bind="_finalDiagDesc" placeholder="Örn: Aterosklerotik Kalp Hastalığı" />
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">Taburculuk Özeti &amp; Epikriz Notu (Zorunlu - En az 20 Karakter):</label>
+                        <textarea class="form-control" rows="3" @bind="_dischargeSummary" placeholder="Hastanın yatış sürecindeki klinik seyri, uygulanan tedaviler, laboratuvar ve klinik sonuçları..."></textarea>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">Taburculuk Önerileri &amp; Yaşam Tarzı Tavsiyeleri:</label>
+                        <textarea class="form-control" rows="2" @bind="_dischargeRecommendations" placeholder="Tuzsuz diyet, 1 hafta ağır kaldırmama, yara pansumanı 2 günde bir..."></textarea>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">Taburculuk Reçetesi Özeti:</label>
+                        <textarea class="form-control" rows="2" @bind="_prescriptionSummary" placeholder="DEMO-Aspirin 100mg 1x1, DEMO-Metoprolol 25mg 1x1..."></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" @onclick="() => _showDischargeModal = false">Vazgeç</button>
+                    <button type="button" class="btn btn-primary" disabled="@(!IsFormValid)" @onclick="SubmitDischargeAsync">
+                        <i class="bi bi-check2-circle me-1"></i> Taburculuk İşlemini Tamamla ve Yatağı Boşalt
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+<!-- Modal: Epikriz Özeti Görüntüleme -->
+@if (_showSummaryModal && _selectedDischargeSummary != null)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal-dialog modal-lg modal-dialog-centered">
+            <div class="modal-content border-0 shadow">
+                <div class="modal-header bg-secondary text-white">
+                    <h5 class="modal-title"><i class="bi bi-file-earmark-medical me-2"></i>Hasta Taburculuk Epikriz Raporu</h5>
+                    <button type="button" class="btn-close btn-close-white" @onclick="() => _showSummaryModal = false"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="p-3 bg-light rounded border mb-3">
+                        <div class="row">
+                            <div class="col-md-6">
+                                <strong>Hasta ID:</strong> @_selectedDischargeSummary.PatientId<br />
+                                <strong>Taburculuk Türü:</strong> @_selectedDischargeSummary.DischargeType<br />
+                                <strong>Taburculuk Tarihi:</strong> @_selectedDischargeSummary.DischargedAtUtc.ToLocalTime().ToString("dd.MM.yyyy HH:mm")
+                            </div>
+                            <div class="col-md-6">
+                                <strong>Kesin Tanı:</strong> @_selectedDischargeSummary.FinalDiagnosisCode - @_selectedDischargeSummary.FinalDiagnosisDescription<br />
+                                @if (!string.IsNullOrWhiteSpace(_selectedDischargeSummary.TransferFacilityName))
+                                {
+                                    <strong>Sevk Edilen Kurum:</strong> @_selectedDischargeSummary.TransferFacilityName<br />
+                                }
+                                @if (_selectedDischargeSummary.FollowUpAppointmentDateUtc.HasValue)
+                                {
+                                    <strong>Kontrol Randevusu:</strong> @_selectedDischargeSummary.FollowUpAppointmentDateUtc.Value.ToLocalTime().ToString("dd.MM.yyyy HH:mm")
+                                }
+                            </div>
+                        </div>
+                    </div>
+
+                    <h6 class="fw-bold text-primary">Klinik Epikriz Özeti:</h6>
+                    <p class="border p-2 rounded bg-white">@_selectedDischargeSummary.DischargeSummary</p>
+
+                    <h6 class="fw-bold text-primary mt-3">Taburculuk Önerileri:</h6>
+                    <p class="border p-2 rounded bg-white">@_selectedDischargeSummary.DischargeRecommendations</p>
+
+                    @if (!string.IsNullOrWhiteSpace(_selectedDischargeSummary.DischargePrescriptionSummary))
+                    {
+                        <h6 class="fw-bold text-primary mt-3">Reçete Özeti:</h6>
+                        <p class="border p-2 rounded bg-white">@_selectedDischargeSummary.DischargePrescriptionSummary</p>
+                    }
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" @onclick="() => _showSummaryModal = false">Kapat</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private bool _isLoading = true;
+    private string? _successMessage;
+    private string? _errorMessage;
+
+    private string _activeTab = "active";
+    private List<AdmissionSummaryResponse> _activeAdmissions = [];
+    private List<InpatientDischargeResponse> _pastDischarges = [];
+
+    // Modal Form
+    private bool _showDischargeModal;
+    private AdmissionSummaryResponse? _selectedAdmission;
+    private string _dischargeType = "Home";
+    private string _finalDiagCode = "I25.1";
+    private string _finalDiagDesc = "Aterosklerotik Kalp Hastalığı";
+    private string _dischargeSummary = "Hasta taburculuk kriterlerini karşılamış olup klinik stabilite sağlanmıştır.";
+    private string _dischargeRecommendations = "Tuzsuz diyet ve düzenli ilaç kullanımı tavsiye edilir.";
+    private string _prescriptionSummary = "DEMO-Aspirin 100mg 1x1, DEMO-Metoprolol 25mg 1x1";
+    private DateTime? _followUpDate = DateTime.UtcNow.AddDays(7);
+    private string? _transferFacilityName;
+    private string? _transferReason;
+
+    private bool IsFormValid =>
+        !string.IsNullOrWhiteSpace(_finalDiagDesc) &&
+        !string.IsNullOrWhiteSpace(_dischargeSummary) &&
+        _dischargeSummary.Trim().Length >= 20 &&
+        (_dischargeType != "TransferToOtherFacility" ||
+         (!string.IsNullOrWhiteSpace(_transferFacilityName) && !string.IsNullOrWhiteSpace(_transferReason)));
+
+    // Modal Summary View
+    private bool _showSummaryModal;
+    private InpatientDischargeResponse? _selectedDischargeSummary;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await RefreshDataAsync();
+    }
+
+    private async Task RefreshDataAsync()
+    {
+        _isLoading = true;
+        _errorMessage = null;
+        try
+        {
+            _activeAdmissions = await InpatientApi.GetAdmissionsAsync(status: "Admitted");
+            _pastDischarges = await InpatientApi.GetDischargesAsync();
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"Veriler alınırken hata oluştu: {ex.Message}";
+        }
+        finally
+        {
+            _isLoading = false;
+            StateHasChanged();
+        }
+    }
+
+    private void OpenDischargeModal(AdmissionSummaryResponse adm)
+    {
+        _selectedAdmission = adm;
+        _dischargeType = "Home";
+        _finalDiagCode = "I25.1";
+        _finalDiagDesc = "Aterosklerotik Kalp Hastalığı";
+        _dischargeSummary = "Hasta yatış süresince medikal tedavi almış olup klinik iyileşme sağlanarak taburculuğu planlanmıştır.";
+        _dischargeRecommendations = "Düşük sodyumlu diyet ve 1 hafta sonra poliklinik kontrolü.";
+        _prescriptionSummary = "DEMO-Aspirin 100mg 1x1";
+        _followUpDate = DateTime.UtcNow.AddDays(7);
+        _transferFacilityName = null;
+        _transferReason = null;
+        _showDischargeModal = true;
+    }
+
+    private async Task SubmitDischargeAsync()
+    {
+        if (_selectedAdmission == null || !IsFormValid) return;
+
+        var req = new DischargeAdmissionRequest
+        {
+            AdmissionId = _selectedAdmission.Id,
+            DischargeType = _dischargeType,
+            DischargeSummary = _dischargeSummary,
+            FinalDiagnosisCode = _finalDiagCode,
+            FinalDiagnosisDescription = _finalDiagDesc,
+            DischargeRecommendations = _dischargeRecommendations,
+            DischargePrescriptionSummary = _prescriptionSummary,
+            FollowUpAppointmentDateUtc = _followUpDate,
+            TransferFacilityName = _transferFacilityName,
+            TransferReason = _transferReason,
+        };
+
+        var result = await InpatientApi.ProcessDischargeAsync(req);
+        if (result != null)
+        {
+            _showDischargeModal = false;
+            _successMessage = "Taburculuk işlemi başarıyla tamamlandı, epikriz kaydedildi ve yatak temizliğe alındı.";
+            await RefreshDataAsync();
+        }
+        else
+        {
+            _errorMessage = "Taburculuk işlemi tamamlanamadı.";
+        }
+    }
+
+    private void OpenSummaryModal(InpatientDischargeResponse d)
+    {
+        _selectedDischargeSummary = d;
+        _showSummaryModal = true;
+    }
+}

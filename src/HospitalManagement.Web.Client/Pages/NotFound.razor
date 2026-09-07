@@ -1,0 +1,15 @@
+@page "/not-found"
+@layout MainLayout
+@inject IStringLocalizer<SharedResources> Localizer
+
+<PageTitle>@Localizer["NotFoundPageTitle"]</PageTitle>
+
+<header class="page-heading">
+    <span class="page-eyebrow">404</span>
+    <h1>@Localizer["NotFoundTitle"]</h1>
+</header>
+
+<EmptyState Title="@Localizer["NotFoundTitle"]"
+            Description="@Localizer["NotFoundDescription"]"
+            ActionText="@Localizer["ReturnToOverview"]"
+            ActionHref="/" />

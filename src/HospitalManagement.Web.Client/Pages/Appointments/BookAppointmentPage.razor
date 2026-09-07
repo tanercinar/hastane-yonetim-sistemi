@@ -1,0 +1,275 @@
+@page "/patient/appointments/book"
+@page "/appointments/book"
+@inject ISchedulingApiClient SchedulingApi
+@inject UserSessionState SessionState
+@inject NavigationManager Navigation
+
+<PageTitle>Randevu Al — Hastane Yönetim Sistemi</PageTitle>
+
+<header class="page-heading">
+    <span class="page-eyebrow">Hasta Portalı</span>
+    <h1 class="page-title">Randevu Arama ve Alma</h1>
+    <p class="page-subtitle">Poliklinik, hekim ve uygun tarih seçerek muayene randevunuzu kolayca oluşturun.</p>
+</header>
+
+@if (_isLoading)
+{
+    <LoadingState />
+}
+else if (_bookingSuccess is not null)
+{
+    <section class="ui-state ui-state--neutral" style="background: var(--hys-color-surface); border: 1px solid var(--hys-color-border); border-radius: var(--hys-radius-lg); padding: var(--hys-space-6); text-align: center;">
+        <span style="font-size: 3rem; color: #16a34a;" aria-hidden="true">✓</span>
+        <h2 class="page-title" style="margin-top: var(--hys-space-3);">Randevunuz Başarıyla Oluşturuldu</h2>
+        <p class="page-subtitle" style="margin-bottom: var(--hys-space-4);">
+            Randevu Tarihi: <strong>@_bookingSuccess.AppointmentTimeUtc.ToLocalTime().ToString("dd MMMM yyyy HH:mm")</strong><br />
+            Randevu Numarası: <code>@_bookingSuccess.Id</code>
+        </p>
+        <div style="display: flex; gap: var(--hys-space-3); justify-content: center;">
+            <a class="ui-button ui-button--primary" href="/patient/appointments">Randevularıma Git</a>
+            <button class="ui-button ui-button--secondary" type="button" @onclick="ResetForm">Yeni Randevu Al</button>
+        </div>
+    </section>
+}
+else
+{
+    <div style="display: flex; flex-direction: column; gap: var(--hys-space-6);">
+        @if (!string.IsNullOrWhiteSpace(_errorMessage))
+        {
+            <div class="ui-state ui-state--danger" role="alert" style="padding: var(--hys-space-3); border-radius: var(--hys-radius-md); background: #fee2e2; color: #991b1b;">
+                @_errorMessage
+            </div>
+        }
+
+        <!-- 1. Poliklinik ve Doktor Seçimi -->
+        <section class="ui-panel" style="background: var(--hys-color-surface); border: 1px solid var(--hys-color-border); border-radius: var(--hys-radius-lg); padding: var(--hys-space-5);">
+            <h2 style="font-size: 1.125rem; font-weight: 600; margin-bottom: var(--hys-space-4);">1. Poliklinik ve Hekim Seçimi</h2>
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: var(--hys-space-4);">
+                <div>
+                    <label class="ui-label" for="deptSelect">Bölüm / Poliklinik</label>
+                    <select id="deptSelect" class="ui-input" @bind="_selectedDepartmentId">
+                        <option value="@_demoDepartmentId">Kardiyoloji Polikliniği</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="ui-label" for="docSelect">Hekim</label>
+                    <select id="docSelect" class="ui-input" @bind="_selectedDoctorId" @bind:after="OnDoctorOrDateChangedAsync">
+                        <option value="@_demoDoctorId">Prof. Dr. Ayşe Yılmaz (Kardiyoloji)</option>
+                    </select>
+                </div>
+            </div>
+        </section>
+
+        <!-- 2. Tarih ve Slot Seçimi -->
+        <section class="ui-panel" style="background: var(--hys-color-surface); border: 1px solid var(--hys-color-border); border-radius: var(--hys-radius-lg); padding: var(--hys-space-5);">
+            <h2 style="font-size: 1.125rem; font-weight: 600; margin-bottom: var(--hys-space-4);">2. Tarih ve Uygun Saat Seçimi</h2>
+            <div style="margin-bottom: var(--hys-space-4);">
+                <label class="ui-label" for="dateSelect">Tarih</label>
+                <input id="dateSelect" type="date" class="ui-input" style="max-width: 240px;"
+                       min="@_minDate.ToString("yyyy-MM-dd")"
+                       max="@_maxDate.ToString("yyyy-MM-dd")"
+                       @bind="_selectedDate"
+                       @bind:after="OnDoctorOrDateChangedAsync" />
+            </div>
+
+            @if (_isLoadingSlots)
+            {
+                <div style="padding: var(--hys-space-4); text-align: center; color: var(--hys-color-muted);">Uygun randevu saatleri yükleniyor...</div>
+            }
+            else if (_availableSlots.Count == 0)
+            {
+                <div class="ui-state ui-state--neutral" style="padding: var(--hys-space-4); text-align: center; border-radius: var(--hys-radius-md); background: var(--hys-color-bg);">
+                    Seçilen tarih için uygun randevu saati bulunmamaktadır. Lütfen başka bir gün seçiniz.
+                </div>
+            }
+            else
+            {
+                <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: var(--hys-space-3);">
+                    @foreach (var slot in _availableSlots)
+                    {
+                        var isSelected = _selectedSlot?.Id == slot.Id;
+                        <button type="button"
+                                class="ui-button @(isSelected ? "ui-button--primary" : "ui-button--secondary")"
+                                style="font-weight: 600; padding: var(--hys-space-3);"
+                                @onclick="() => SelectSlot(slot)">
+                            @slot.StartUtc.ToLocalTime().ToString("HH:mm")
+                        </button>
+                    }
+                </div>
+            }
+        </section>
+
+        <!-- 3. Şikayet ve Onay -->
+        @if (_selectedSlot is not null)
+        {
+            <section class="ui-panel" style="background: var(--hys-color-surface); border: 1px solid var(--hys-color-border); border-radius: var(--hys-radius-lg); padding: var(--hys-space-5);">
+                <h2 style="font-size: 1.125rem; font-weight: 600; margin-bottom: var(--hys-space-4);">3. Randevu Detayları ve Onay</h2>
+                <div style="background: var(--hys-color-bg); padding: var(--hys-space-4); border-radius: var(--hys-radius-md); margin-bottom: var(--hys-space-4);">
+                    <p style="margin: 0 0 var(--hys-space-2) 0;">Seçilen Zaman: <strong>@_selectedSlot.StartUtc.ToLocalTime().ToString("dd MMMM yyyy, dddd HH:mm")</strong></p>
+                    <p style="margin: 0;">Poliklinik: <strong>Kardiyoloji</strong> | Hekim: <strong>Prof. Dr. Ayşe Yılmaz</strong></p>
+                </div>
+
+                <div style="margin-bottom: var(--hys-space-4);">
+                    <label class="ui-label" for="reasonInput">Geliş Şikayeti / Ön Bilgi (Opsiyonel)</label>
+                    <textarea id="reasonInput" class="ui-input" rows="3" placeholder="Muayene olma nedeninizi veya şikayetinizi kısaca belirtebilirsiniz..." @bind="_reasonForVisit"></textarea>
+                </div>
+
+                <button class="ui-button ui-button--primary" type="button" disabled="@_isSubmitting" @onclick="SubmitBookingAsync">
+                    @if (_isSubmitting)
+                    {
+                        <span>Randevu Alınıyor...</span>
+                    }
+                    else
+                    {
+                        <span>Randevuyu Onayla</span>
+                    }
+                </button>
+            </section>
+        }
+    </div>
+}
+
+@code {
+    private readonly Guid _demoDoctorId = Guid.Parse("00000000-0000-0000-0000-000000000102");
+    private readonly Guid _demoDepartmentId = Guid.Parse("30000000-0000-0000-0000-000000000003");
+
+    private Guid _selectedDoctorId;
+    private Guid _selectedDepartmentId;
+    private DateOnly _selectedDate = DateOnly.FromDateTime(DateTime.UtcNow);
+    private DateOnly _minDate = DateOnly.FromDateTime(DateTime.UtcNow);
+    private DateOnly _maxDate = DateOnly.FromDateTime(DateTime.UtcNow.AddDays(14));
+
+    private bool _isLoading = true;
+    private bool _isLoadingSlots;
+    private bool _isSubmitting;
+    private string? _errorMessage;
+    private string? _reasonForVisit;
+
+    private Guid? _currentPatientPersonId;
+    private AppointmentSlotResponse? _selectedSlot;
+    private List<AppointmentSlotResponse> _availableSlots = [];
+    private AppointmentDetailResponse? _bookingSuccess;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _selectedDoctorId = _demoDoctorId;
+        _selectedDepartmentId = _demoDepartmentId;
+
+        try
+        {
+            await SessionState.EnsureLoadedAsync();
+            if (!SessionState.IsAuthenticated || !SessionState.IsPatient)
+            {
+                Navigation.NavigateTo("account/login");
+                return;
+            }
+
+            if (Guid.TryParse(SessionState.PersonId, out var pid))
+            {
+                _currentPatientPersonId = pid;
+            }
+            await LoadAvailableSlotsAsync();
+        }
+        catch (Exception)
+        {
+            _errorMessage = "Oturum bilgisi alınamadı. Lütfen bağlantınızı kontrol edip yeniden deneyin.";
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+    }
+
+    private async Task OnDoctorOrDateChangedAsync()
+    {
+        _selectedSlot = null;
+        await LoadAvailableSlotsAsync();
+    }
+
+    private async Task LoadAvailableSlotsAsync()
+    {
+        _isLoadingSlots = true;
+        _errorMessage = null;
+
+        try
+        {
+            var days = await SchedulingApi.GetDoctorAvailabilityAsync(
+                _selectedDoctorId,
+                startDate: _selectedDate,
+                endDate: _selectedDate);
+
+            if (days is null)
+            {
+                _availableSlots = [];
+            }
+            else
+            {
+                var day = days.FirstOrDefault(d => d.Date == _selectedDate);
+                _availableSlots = day?.Slots.Where(s => s.Status == "Available").ToList() ?? [];
+            }
+        }
+        catch (Exception)
+        {
+            _errorMessage = "Uygun saatler alınamadı. Lütfen bağlantınızı kontrol edip yeniden deneyin.";
+        }
+        finally
+        {
+            _isLoadingSlots = false;
+        }
+    }
+
+    private void SelectSlot(AppointmentSlotResponse slot)
+    {
+        _selectedSlot = slot;
+    }
+
+    private async Task SubmitBookingAsync()
+    {
+        if (_selectedSlot is null || !_currentPatientPersonId.HasValue)
+        {
+            return;
+        }
+
+        _isSubmitting = true;
+        _errorMessage = null;
+
+        try
+        {
+            var request = new BookAppointmentRequest
+            {
+                SlotId = _selectedSlot.Id,
+                PatientId = _currentPatientPersonId.Value,
+                ReasonForVisit = _reasonForVisit,
+            };
+
+            var result = await SchedulingApi.BookAppointmentAsync(request);
+            if (result is null)
+            {
+                await LoadAvailableSlotsAsync();
+                _selectedSlot = null;
+                _errorMessage = "Randevu oluşturulamadı. Seçtiğiniz slot başka bir kullanıcı tarafından alınmış olabilir. Lütfen başka bir saat seçiniz.";
+            }
+            else
+            {
+                _bookingSuccess = result;
+            }
+        }
+        catch (Exception)
+        {
+            _errorMessage = "Randevu işlemi tamamlanamadı. Lütfen bağlantınızı kontrol edip yeniden deneyin.";
+        }
+        finally
+        {
+            _isSubmitting = false;
+        }
+    }
+
+    private void ResetForm()
+    {
+        _bookingSuccess = null;
+        _selectedSlot = null;
+        _reasonForVisit = null;
+        _selectedDate = DateOnly.FromDateTime(DateTime.UtcNow);
+        _ = LoadAvailableSlotsAsync();
+    }
+}

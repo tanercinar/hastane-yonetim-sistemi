@@ -1,0 +1,736 @@
+@page "/diagnostics/pathology"
+@using HospitalManagement.Contracts.Diagnostics
+@using HospitalManagement.Web.Client.Diagnostics
+@inject IDiagnosticsApiClient DiagnosticsApi
+@inject NavigationManager Navigation
+
+<PageTitle>Patoloji Laboratuvarı ve Raporlama - Hastane Yönetim Sistemi</PageTitle>
+
+<div class="container-fluid px-4 py-3">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <div>
+            <h3 class="mb-0 text-primary">
+                <i class="bi bi-virus me-2"></i>Patoloji Laboratuvarı ve Raporlama
+            </h3>
+            <div class="text-muted small">
+                Doku materyali kabulü, makroskopi ve mikroskopi inceleme kayıtları, patoloji raporlaması ve gerekçeli düzeltme akışı.
+            </div>
+        </div>
+        <div class="d-flex gap-2">
+            <button class="btn btn-outline-secondary btn-sm" @onclick="LoadCasesAsync" disabled="@_isLoading">
+                <i class="bi bi-arrow-clockwise me-1"></i>Yenile
+            </button>
+        </div>
+    </div>
+
+    @if (!string.IsNullOrWhiteSpace(_errorMessage))
+    {
+        <div class="alert alert-danger alert-dismissible fade show" role="alert">
+            <i class="bi bi-exclamation-triangle-fill me-2"></i>@_errorMessage
+            <button type="button" class="btn-close" @onclick="() => _errorMessage = null"></button>
+        </div>
+    }
+
+    @if (!string.IsNullOrWhiteSpace(_successMessage))
+    {
+        <div class="alert alert-success alert-dismissible fade show" role="alert">
+            <i class="bi bi-check-circle-fill me-2"></i>@_successMessage
+            <button type="button" class="btn-close" @onclick="() => _successMessage = null"></button>
+        </div>
+    }
+
+    <!-- Filter Card -->
+    <div class="card shadow-sm border-0 mb-4 bg-light">
+        <div class="card-body py-2 px-3">
+            <div class="row g-2 align-items-center">
+                <div class="col-md-4">
+                    <label class="form-label small mb-1 fw-bold text-muted">Durum Filtresi</label>
+                    <select class="form-select form-select-sm" @bind="_selectedStatus">
+                        <option value="">Tüm Durumlar</option>
+                        <option value="Ordered">İstem Verildi (Kabul Bekliyor)</option>
+                        <option value="SpecimenReceived">Materyal Kabul Edildi</option>
+                        <option value="GrossExamCompleted">Makroskopi Tamamlandı</option>
+                        <option value="MicroscopicExamCompleted">Mikroskopi Tamamlandı</option>
+                        <option value="ReportDrafted">Taslak Rapor</option>
+                        <option value="ReportFinalized">Rapor Kesinleşti</option>
+                        <option value="Corrected">Düzeltilmiş Rapor</option>
+                        <option value="Cancelled">İptal Edildi</option>
+                    </select>
+                </div>
+                <div class="col-md-2 d-flex align-items-end">
+                    <button class="btn btn-sm btn-primary w-100 mt-auto" @onclick="LoadCasesAsync" disabled="@_isLoading">
+                        <i class="bi bi-funnel me-1"></i>Filtrele
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Worklist Table -->
+    <div class="card shadow-sm border-0">
+        <div class="card-body p-0">
+            @if (_isLoading)
+            {
+                <div class="text-center py-5">
+                    <div class="spinner-border text-primary" role="status">
+                        <span class="visually-hidden">Yükleniyor...</span>
+                    </div>
+                    <div class="text-muted mt-2 small">Patoloji iş listesi yükleniyor...</div>
+                </div>
+            }
+            else if (_cases.Count == 0)
+            {
+                <div class="text-center py-5 text-muted">
+                    <i class="bi bi-inbox fs-1 d-block mb-2"></i>
+                    Seçilen kriterlere uygun patoloji vakası bulunamadı.
+                </div>
+            }
+            else
+            {
+                <div class="table-responsive">
+                    <table class="table table-hover align-middle mb-0">
+                        <thead class="table-light small text-uppercase">
+                            <tr>
+                                <th>Patoloji No</th>
+                                <th>Materyal Türü</th>
+                                <th>Anatomik Bölge</th>
+                                <th>Hasta ID</th>
+                                <th>Durum</th>
+                                <th>Kabul Tarihi</th>
+                                <th>Rapor Tarihi</th>
+                                <th class="text-end">İşlemler</th>
+                            </tr>
+                        </thead>
+                        <tbody class="small">
+                            @foreach (var c in _cases)
+                            {
+                                <tr>
+                                    <td>
+                                        <strong class="font-monospace text-primary">@c.PathologyNumber</strong>
+                                    </td>
+                                    <td>
+                                        <span class="badge bg-secondary">@GetSpecimenTypeText(c.SpecimenType)</span>
+                                    </td>
+                                    <td>
+                                        <span>@c.AnatomicSite</span>
+                                    </td>
+                                    <td>
+                                        <span class="font-monospace small text-muted">@c.PatientId.ToString().Substring(0, 8)...</span>
+                                    </td>
+                                    <td>
+                                        <span class="badge @GetStatusBadgeClass(c.Status)">@GetStatusText(c.Status)</span>
+                                    </td>
+                                    <td class="text-muted">
+                                        @(c.ReceivedAtUtc.HasValue ? c.ReceivedAtUtc.Value.ToLocalTime().ToString("dd.MM.yyyy HH:mm") : "-")
+                                    </td>
+                                    <td class="text-muted">
+                                        @(c.ReportFinalizedAtUtc.HasValue ? c.ReportFinalizedAtUtc.Value.ToLocalTime().ToString("dd.MM.yyyy HH:mm") : "-")
+                                    </td>
+                                    <td class="text-end">
+                                        @if (c.Status == "Ordered")
+                                        {
+                                            <button class="btn btn-sm btn-outline-primary me-1" @onclick="() => OpenReceiveModal(c.Id)">
+                                                <i class="bi bi-box-arrow-in-down me-1"></i>Kabul Et
+                                            </button>
+                                        }
+                                        else if (c.Status == "SpecimenReceived")
+                                        {
+                                            <button class="btn btn-sm btn-info text-white me-1" @onclick="() => OpenGrossModal(c.Id)">
+                                                <i class="bi bi-eye me-1"></i>Makroskopi
+                                            </button>
+                                        }
+                                        else if (c.Status == "GrossExamCompleted")
+                                        {
+                                            <button class="btn btn-sm btn-primary me-1" @onclick="() => OpenMicroscopicModal(c.Id)">
+                                                <i class="bi bi-optical-audio me-1"></i>Mikroskopi
+                                            </button>
+                                        }
+                                        else if (c.Status == "MicroscopicExamCompleted" || c.Status == "ReportDrafted")
+                                        {
+                                            <button class="btn btn-sm btn-warning text-dark me-1" @onclick="() => OpenReportingModal(c.Id)">
+                                                <i class="bi bi-file-earmark-text me-1"></i>Raporla
+                                            </button>
+                                        }
+                                        else if (c.Status == "ReportFinalized" || c.Status == "Corrected")
+                                        {
+                                            <button class="btn btn-sm btn-outline-success me-1" @onclick="() => ViewReportModal(c.Id)">
+                                                <i class="bi bi-file-text me-1"></i>Raporu Gör
+                                            </button>
+                                            <button class="btn btn-sm btn-outline-secondary me-1" @onclick="() => OpenCorrectionModal(c.Id)">
+                                                <i class="bi bi-pencil-square me-1"></i>Düzelt
+                                            </button>
+                                        }
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </div>
+    </div>
+</div>
+
+<!-- Receive Modal -->
+@if (_showReceiveModal && _activeCaseDetail != null)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);" role="dialog">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content shadow border-0">
+                <div class="modal-header bg-primary text-white">
+                    <h5 class="modal-title fs-6">
+                        <i class="bi bi-box-arrow-in-down me-2"></i>Patoloji Materyali Kabulü
+                    </h5>
+                    <button type="button" class="btn-close btn-close-white" @onclick="() => _showReceiveModal = false"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label small fw-bold">Vaka Numarası</label>
+                        <input type="text" class="form-control form-control-sm font-monospace bg-light" value="@_activeCaseDetail.PathologyNumber" readonly />
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label small fw-bold">Anatomik Bölge</label>
+                        <input type="text" class="form-control form-control-sm bg-light" value="@_activeCaseDetail.AnatomicSite" readonly />
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label small fw-bold">Tespit Solüsyonu (Fiksatif) <span class="text-danger">*</span></label>
+                        <select class="form-select form-select-sm" @bind="_fixativeUsed">
+                            <option value="%10 Nötral Tamponlu Formalin">%10 Nötral Tamponlu Formalin</option>
+                            <option value="%96 Etil Alkol">%96 Etil Alkol (Sitoloji)</option>
+                            <option value="Bouin Solüsyonu">Bouin Solüsyonu</option>
+                            <option value="Taze Doku (Fiksasyonsuz / Frozen)">Taze Doku (Fiksasyonsuz / Frozen)</option>
+                            <option value="Diğer">Diğer</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="modal-footer bg-light">
+                    <button type="button" class="btn btn-sm btn-secondary" @onclick="() => _showReceiveModal = false">Vazgeç</button>
+                    <button type="button" class="btn btn-sm btn-primary" @onclick="SubmitReceiveAsync" disabled="@_isSubmitting">
+                        <i class="bi bi-check2 me-1"></i>Materyali Kabul Et
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+<!-- Gross Exam Modal -->
+@if (_showGrossModal && _activeCaseDetail != null)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);" role="dialog">
+        <div class="modal-dialog modal-lg modal-dialog-centered">
+            <div class="modal-content shadow border-0">
+                <div class="modal-header bg-info text-white">
+                    <h5 class="modal-title fs-6">
+                        <i class="bi bi-eye me-2"></i>Makroskopi İnceleme Girişi
+                    </h5>
+                    <button type="button" class="btn-close btn-close-white" @onclick="() => _showGrossModal = false"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="alert alert-info py-2 small mb-3">
+                        <strong>Vaka:</strong> @_activeCaseDetail.PathologyNumber | <strong>Bölge:</strong> @_activeCaseDetail.AnatomicSite | <strong>Fiksatif:</strong> @_activeCaseDetail.FixativeUsed
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label small fw-bold">Makroskopi Bulguları (Ölçüm, Renk, Kıvam, Kasetleme) <span class="text-danger">*</span></label>
+                        <textarea class="form-control" rows="6" @bind="_grossDescription" placeholder="Örnek: 2x1.5x0.8 cm boyutlarında kirli beyaz renkli, elastik kıvamda doku parçası. 1 kaset halinde takibe alındı."></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer bg-light">
+                    <button type="button" class="btn btn-sm btn-secondary" @onclick="() => _showGrossModal = false">Vazgeç</button>
+                    <button type="button" class="btn btn-sm btn-info text-white" @onclick="SubmitGrossExamAsync" disabled="@(_isSubmitting || string.IsNullOrWhiteSpace(_grossDescription))">
+                        <i class="bi bi-check2 me-1"></i>Makroskopiyi Kaydet
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+<!-- Microscopic Exam Modal -->
+@if (_showMicroscopicModal && _activeCaseDetail != null)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);" role="dialog">
+        <div class="modal-dialog modal-lg modal-dialog-centered">
+            <div class="modal-content shadow border-0">
+                <div class="modal-header bg-primary text-white">
+                    <h5 class="modal-title fs-6">
+                        <i class="bi bi-optical-audio me-2"></i>Mikroskopi İnceleme Girişi
+                    </h5>
+                    <button type="button" class="btn-close btn-close-white" @onclick="() => _showMicroscopicModal = false"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="alert alert-light border py-2 small mb-3">
+                        <strong>Makroskopi:</strong> @_activeCaseDetail.GrossDescription
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label small fw-bold">Mikroskopi Bulguları (H&E, Histopatoloji, İmmünohistokimya) <span class="text-danger">*</span></label>
+                        <textarea class="form-control" rows="6" @bind="_microscopicDescription" placeholder="Örnek: Kesitlerin incelenmesinde lamina propriada lenfoplazmositer infiltrasyon ve hafif glandüler hiperplazi izlendi. Malignite bulgusuna rastlanmadı."></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer bg-light">
+                    <button type="button" class="btn btn-sm btn-secondary" @onclick="() => _showMicroscopicModal = false">Vazgeç</button>
+                    <button type="button" class="btn btn-sm btn-primary" @onclick="SubmitMicroscopicExamAsync" disabled="@(_isSubmitting || string.IsNullOrWhiteSpace(_microscopicDescription))">
+                        <i class="bi bi-check2 me-1"></i>Mikroskopiyi Kaydet
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+<!-- Reporting Modal -->
+@if (_showReportingModal && _activeCaseDetail != null)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);" role="dialog">
+        <div class="modal-dialog modal-lg modal-dialog-centered">
+            <div class="modal-content shadow border-0">
+                <div class="modal-header bg-warning text-dark">
+                    <h5 class="modal-title fs-6 fw-bold">
+                        <i class="bi bi-file-earmark-text me-2"></i>Patoloji Raporu Hazırlama
+                    </h5>
+                    <button type="button" class="btn-close" @onclick="() => _showReportingModal = false"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="card mb-3 bg-light border-0">
+                        <div class="card-body py-2 px-3 small">
+                            <div><strong>Makroskopi:</strong> @_activeCaseDetail.GrossDescription</div>
+                            <div class="mt-1"><strong>Mikroskopi:</strong> @_activeCaseDetail.MicroscopicDescription</div>
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label small fw-bold">Patolojik Tanı / Kanaat <span class="text-danger">*</span></label>
+                        <textarea class="form-control" rows="5" @bind="_pathologicalDiagnosis" placeholder="Örnek: KRONİK NON-SPESİFİK GASTRİT (H. Pylori negatif, atrofi yok, intestinal metaplazi saptanmadı)."></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer bg-light d-flex justify-content-between">
+                    <button type="button" class="btn btn-sm btn-secondary" @onclick="() => _showReportingModal = false">Vazgeç</button>
+                    <div class="d-flex gap-2">
+                        <button type="button" class="btn btn-sm btn-outline-warning text-dark" @onclick="SubmitDraftReportAsync" disabled="@(_isSubmitting || string.IsNullOrWhiteSpace(_pathologicalDiagnosis))">
+                            <i class="bi bi-save me-1"></i>Taslak Olarak Kaydet
+                        </button>
+                        <button type="button" class="btn btn-sm btn-success" @onclick="SubmitFinalizeReportAsync" disabled="@(_isSubmitting || string.IsNullOrWhiteSpace(_pathologicalDiagnosis))">
+                            <i class="bi bi-check-circle-fill me-1"></i>Uzman Onayla ve Kesinleştir
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+<!-- View Report Modal -->
+@if (_showViewReportModal && _activeCaseDetail != null)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);" role="dialog">
+        <div class="modal-dialog modal-lg modal-dialog-centered">
+            <div class="modal-content shadow border-0">
+                <div class="modal-header bg-success text-white">
+                    <h5 class="modal-title fs-6">
+                        <i class="bi bi-file-earmark-medical me-2"></i>Patoloji Raporu — @_activeCaseDetail.PathologyNumber
+                    </h5>
+                    <button type="button" class="btn-close btn-close-white" @onclick="() => _showViewReportModal = false"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="row g-2 mb-3 small bg-light p-2 rounded">
+                        <div class="col-md-6"><strong>Materyal Türü:</strong> @GetSpecimenTypeText(_activeCaseDetail.SpecimenType.ToString())</div>
+                        <div class="col-md-6"><strong>Anatomik Bölge:</strong> @_activeCaseDetail.AnatomicSite</div>
+                        <div class="col-md-6"><strong>Kabul Tarihi:</strong> @_activeCaseDetail.ReceivedAtUtc?.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</div>
+                        <div class="col-md-6"><strong>Onay Tarihi:</strong> @_activeCaseDetail.ReportFinalizedAtUtc?.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</div>
+                        @if (!string.IsNullOrWhiteSpace(_activeCaseDetail.CorrectionReason))
+                        {
+                            <div class="col-12 text-danger mt-1">
+                                <strong><i class="bi bi-exclamation-diamond me-1"></i>Düzeltme Gerekçesi:</strong> @_activeCaseDetail.CorrectionReason
+                            </div>
+                        }
+                    </div>
+
+                    <h6 class="small fw-bold text-uppercase text-secondary mt-3">Makroskopi Bulguları</h6>
+                    <div class="p-2 border rounded bg-white small mb-3">@_activeCaseDetail.GrossDescription</div>
+
+                    <h6 class="small fw-bold text-uppercase text-secondary">Mikroskopi Bulguları</h6>
+                    <div class="p-2 border rounded bg-white small mb-3">@_activeCaseDetail.MicroscopicDescription</div>
+
+                    <h6 class="small fw-bold text-uppercase text-primary">Patolojik Tanı</h6>
+                    <div class="p-3 border border-primary-subtle rounded bg-light fw-bold small">
+                        @_activeCaseDetail.PathologicalDiagnosis
+                    </div>
+                </div>
+                <div class="modal-footer bg-light">
+                    <button type="button" class="btn btn-sm btn-secondary" @onclick="() => _showViewReportModal = false">Kapat</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+<!-- Correction Modal -->
+@if (_showCorrectionModal && _activeCaseDetail != null)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);" role="dialog">
+        <div class="modal-dialog modal-lg modal-dialog-centered">
+            <div class="modal-content shadow border-0">
+                <div class="modal-header bg-danger text-white">
+                    <h5 class="modal-title fs-6">
+                        <i class="bi bi-pencil-square me-2"></i>Patoloji Raporu Düzeltme
+                    </h5>
+                    <button type="button" class="btn-close btn-close-white" @onclick="() => _showCorrectionModal = false"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="alert alert-warning py-2 small mb-3">
+                        <i class="bi bi-shield-exclamation me-1"></i>
+                        Kesinleşmiş patoloji raporları sessizce güncellenemez. Zorunlu düzeltme gerekçesi belirtilerek yeni bir sürüm oluşturulacaktır.
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label small fw-bold">Düzeltme Gerekçesi <span class="text-danger">*</span></label>
+                        <input type="text" class="form-control form-control-sm" @bind="_correctionReason" placeholder="Örnek: İmmünohistokimyasal ek boyama sonucu eklendi ve tanı revize edildi." />
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label small fw-bold">Yeni / Düzeltilmiş Patolojik Tanı <span class="text-danger">*</span></label>
+                        <textarea class="form-control" rows="5" @bind="_newDiagnosis" placeholder="Düzeltilmiş patolojik tanı metnini giriniz..."></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer bg-light">
+                    <button type="button" class="btn btn-sm btn-secondary" @onclick="() => _showCorrectionModal = false">Vazgeç</button>
+                    <button type="button" class="btn btn-sm btn-danger" @onclick="SubmitCorrectionAsync" disabled="@(_isSubmitting || string.IsNullOrWhiteSpace(_correctionReason) || string.IsNullOrWhiteSpace(_newDiagnosis))">
+                        <i class="bi bi-check2 me-1"></i>Düzeltmeyi Kaydet ve Yayınla
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private List<PathologyCaseSummaryResponse> _cases = [];
+    private PathologyCaseDetailResponse? _activeCaseDetail;
+
+    private string? _selectedStatus;
+    private string _fixativeUsed = "%10 Nötral Tamponlu Formalin";
+    private string? _grossDescription;
+    private string? _microscopicDescription;
+    private string? _pathologicalDiagnosis;
+    private string? _correctionReason;
+    private string? _newDiagnosis;
+
+    private bool _isLoading;
+    private bool _isSubmitting;
+    private bool _showReceiveModal;
+    private bool _showGrossModal;
+    private bool _showMicroscopicModal;
+    private bool _showReportingModal;
+    private bool _showViewReportModal;
+    private bool _showCorrectionModal;
+
+    private string? _errorMessage;
+    private string? _successMessage;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadCasesAsync();
+    }
+
+    private async Task LoadCasesAsync()
+    {
+        _isLoading = true;
+        _errorMessage = null;
+
+        try
+        {
+            _cases = await DiagnosticsApi.GetPathologyWorklistAsync(_selectedStatus);
+        }
+        catch (Exception)
+        {
+            _errorMessage = "Patoloji iş listesi yüklenemedi. Lütfen yeniden deneyin.";
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+    }
+
+    private async Task OpenReceiveModal(Guid id)
+    {
+        _activeCaseDetail = await DiagnosticsApi.GetPathologyCaseByIdAsync(id);
+        if (_activeCaseDetail != null)
+        {
+            _fixativeUsed = "%10 Nötral Tamponlu Formalin";
+            _showReceiveModal = true;
+        }
+    }
+
+    private async Task SubmitReceiveAsync()
+    {
+        if (_activeCaseDetail == null || string.IsNullOrWhiteSpace(_fixativeUsed)) return;
+        _isSubmitting = true;
+        _errorMessage = null;
+
+        try
+        {
+            var req = new ReceivePathologySpecimenRequest { FixativeUsed = _fixativeUsed };
+            var updated = await DiagnosticsApi.ReceivePathologySpecimenAsync(_activeCaseDetail.Id, req);
+            if (updated != null)
+            {
+                _showReceiveModal = false;
+                _successMessage = "Doku materyali laboratuvara kabul edildi.";
+                await LoadCasesAsync();
+            }
+            else
+            {
+                _errorMessage = "Materyal kabulü başarısız oldu.";
+            }
+        }
+        catch (Exception)
+        {
+            _errorMessage = "Patoloji numunesi kabulü kaydedilemedi. Lütfen yeniden deneyin.";
+        }
+        finally
+        {
+            _isSubmitting = false;
+        }
+    }
+
+    private async Task OpenGrossModal(Guid id)
+    {
+        _activeCaseDetail = await DiagnosticsApi.GetPathologyCaseByIdAsync(id);
+        if (_activeCaseDetail != null)
+        {
+            _grossDescription = _activeCaseDetail.GrossDescription;
+            _showGrossModal = true;
+        }
+    }
+
+    private async Task SubmitGrossExamAsync()
+    {
+        if (_activeCaseDetail == null || string.IsNullOrWhiteSpace(_grossDescription)) return;
+        _isSubmitting = true;
+        _errorMessage = null;
+
+        try
+        {
+            var req = new RecordGrossExamRequest { GrossDescription = _grossDescription.Trim() };
+            var updated = await DiagnosticsApi.RecordPathologyGrossExamAsync(_activeCaseDetail.Id, req);
+            if (updated != null)
+            {
+                _showGrossModal = false;
+                _successMessage = "Makroskopi inceleme bulguları başarıyla kaydedildi.";
+                await LoadCasesAsync();
+            }
+            else
+            {
+                _errorMessage = "Makroskopi bulguları kaydedilemedi.";
+            }
+        }
+        catch (Exception)
+        {
+            _errorMessage = "Makroskopi kaydı tamamlanamadı. Lütfen yeniden deneyin.";
+        }
+        finally
+        {
+            _isSubmitting = false;
+        }
+    }
+
+    private async Task OpenMicroscopicModal(Guid id)
+    {
+        _activeCaseDetail = await DiagnosticsApi.GetPathologyCaseByIdAsync(id);
+        if (_activeCaseDetail != null)
+        {
+            _microscopicDescription = _activeCaseDetail.MicroscopicDescription;
+            _showMicroscopicModal = true;
+        }
+    }
+
+    private async Task SubmitMicroscopicExamAsync()
+    {
+        if (_activeCaseDetail == null || string.IsNullOrWhiteSpace(_microscopicDescription)) return;
+        _isSubmitting = true;
+        _errorMessage = null;
+
+        try
+        {
+            var req = new RecordMicroscopicExamRequest { MicroscopicDescription = _microscopicDescription.Trim() };
+            var updated = await DiagnosticsApi.RecordPathologyMicroscopicExamAsync(_activeCaseDetail.Id, req);
+            if (updated != null)
+            {
+                _showMicroscopicModal = false;
+                _successMessage = "Mikroskopi inceleme bulguları başarıyla kaydedildi.";
+                await LoadCasesAsync();
+            }
+            else
+            {
+                _errorMessage = "Mikroskopi bulguları kaydedilemedi.";
+            }
+        }
+        catch (Exception)
+        {
+            _errorMessage = "Mikroskopi kaydı tamamlanamadı. Lütfen yeniden deneyin.";
+        }
+        finally
+        {
+            _isSubmitting = false;
+        }
+    }
+
+    private async Task OpenReportingModal(Guid id)
+    {
+        _activeCaseDetail = await DiagnosticsApi.GetPathologyCaseByIdAsync(id);
+        if (_activeCaseDetail != null)
+        {
+            _pathologicalDiagnosis = _activeCaseDetail.PathologicalDiagnosis;
+            _showReportingModal = true;
+        }
+    }
+
+    private async Task SubmitDraftReportAsync()
+    {
+        if (_activeCaseDetail == null || string.IsNullOrWhiteSpace(_pathologicalDiagnosis)) return;
+        _isSubmitting = true;
+        _errorMessage = null;
+
+        try
+        {
+            var req = new DraftPathologyReportRequest { PathologicalDiagnosis = _pathologicalDiagnosis.Trim() };
+            var updated = await DiagnosticsApi.DraftPathologyReportAsync(_activeCaseDetail.Id, req);
+            if (updated != null)
+            {
+                _showReportingModal = false;
+                _successMessage = "Patoloji rapor taslağı kaydedildi.";
+                await LoadCasesAsync();
+            }
+            else
+            {
+                _errorMessage = "Rapor taslağı kaydedilemedi.";
+            }
+        }
+        catch (Exception)
+        {
+            _errorMessage = "Patoloji raporu taslağı kaydedilemedi. Lütfen yeniden deneyin.";
+        }
+        finally
+        {
+            _isSubmitting = false;
+        }
+    }
+
+    private async Task SubmitFinalizeReportAsync()
+    {
+        if (_activeCaseDetail == null || string.IsNullOrWhiteSpace(_pathologicalDiagnosis)) return;
+        _isSubmitting = true;
+        _errorMessage = null;
+
+        try
+        {
+            var req = new FinalizePathologyReportRequest { PathologicalDiagnosis = _pathologicalDiagnosis.Trim() };
+            var updated = await DiagnosticsApi.FinalizePathologyReportAsync(_activeCaseDetail.Id, req);
+            if (updated != null)
+            {
+                _showReportingModal = false;
+                _successMessage = "Patoloji raporu uzman patolog tarafından onaylandı ve kesinleştirildi.";
+                await LoadCasesAsync();
+            }
+            else
+            {
+                _errorMessage = "Patoloji raporu onaylanamadı.";
+            }
+        }
+        catch (Exception)
+        {
+            _errorMessage = "Patoloji raporu kesinleştirilemedi. Lütfen yeniden deneyin.";
+        }
+        finally
+        {
+            _isSubmitting = false;
+        }
+    }
+
+    private async Task ViewReportModal(Guid id)
+    {
+        _activeCaseDetail = await DiagnosticsApi.GetPathologyCaseByIdAsync(id);
+        if (_activeCaseDetail != null)
+        {
+            _showViewReportModal = true;
+        }
+    }
+
+    private async Task OpenCorrectionModal(Guid id)
+    {
+        _activeCaseDetail = await DiagnosticsApi.GetPathologyCaseByIdAsync(id);
+        if (_activeCaseDetail != null)
+        {
+            _correctionReason = null;
+            _newDiagnosis = _activeCaseDetail.PathologicalDiagnosis;
+            _showCorrectionModal = true;
+        }
+    }
+
+    private async Task SubmitCorrectionAsync()
+    {
+        if (_activeCaseDetail == null || string.IsNullOrWhiteSpace(_correctionReason) || string.IsNullOrWhiteSpace(_newDiagnosis)) return;
+        _isSubmitting = true;
+        _errorMessage = null;
+
+        try
+        {
+            var req = new CorrectPathologyReportRequest
+            {
+                CorrectionReason = _correctionReason.Trim(),
+                NewDiagnosis = _newDiagnosis.Trim(),
+            };
+            var updated = await DiagnosticsApi.CorrectPathologyReportAsync(_activeCaseDetail.Id, req);
+            if (updated != null)
+            {
+                _showCorrectionModal = false;
+                _successMessage = "Düzeltilmiş patoloji raporu başarıyla yayınlandı.";
+                await LoadCasesAsync();
+            }
+            else
+            {
+                _errorMessage = "Düzeltme kaydedilemedi.";
+            }
+        }
+        catch (Exception)
+        {
+            _errorMessage = "Patoloji raporu düzeltmesi kaydedilemedi. Lütfen yeniden deneyin.";
+        }
+        finally
+        {
+            _isSubmitting = false;
+        }
+    }
+
+    private static string GetSpecimenTypeText(string type) => type switch
+    {
+        "Biopsy" => "Biyopsi",
+        "Excision" => "Eksizyon",
+        "Cytology" => "Sitoloji",
+        "FrozenSection" => "Frozen Kesit",
+        "Resection" => "Rezeksiyon",
+        _ => type,
+    };
+
+    private static string GetStatusBadgeClass(string status) => status switch
+    {
+        "Ordered" => "bg-secondary text-white",
+        "SpecimenReceived" => "bg-info text-white",
+        "GrossExamCompleted" => "bg-primary text-white",
+        "MicroscopicExamCompleted" => "bg-indigo text-white bg-dark",
+        "ReportDrafted" => "bg-warning text-dark",
+        "ReportFinalized" => "bg-success text-white",
+        "Corrected" => "bg-success-subtle text-success border border-success",
+        "Cancelled" => "bg-danger text-white",
+        _ => "bg-light text-dark",
+    };
+
+    private static string GetStatusText(string status) => status switch
+    {
+        "Ordered" => "İstem Verildi",
+        "SpecimenReceived" => "Materyal Kabul Edildi",
+        "GrossExamCompleted" => "Makroskopi Bitti",
+        "MicroscopicExamCompleted" => "Mikroskopi Bitti",
+        "ReportDrafted" => "Taslak Rapor",
+        "ReportFinalized" => "Rapor Kesinleşti",
+        "Corrected" => "Düzeltilmiş Rapor",
+        "Cancelled" => "İptal Edildi",
+        _ => status,
+    };
+}

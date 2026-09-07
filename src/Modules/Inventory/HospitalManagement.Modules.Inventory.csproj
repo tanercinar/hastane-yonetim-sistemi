@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <Description>Klinik stok, sarf, lot, son kullanma ve hareket modülü.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../HospitalManagement.BuildingBlocks/HospitalManagement.BuildingBlocks.csproj" />
+  </ItemGroup>
+</Project>

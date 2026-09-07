@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <Description>Hasta kimliği, demografi, iletişim ve ilişkilendirme modülü.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../HospitalManagement.BuildingBlocks/HospitalManagement.BuildingBlocks.csproj" />
+  </ItemGroup>
+</Project>

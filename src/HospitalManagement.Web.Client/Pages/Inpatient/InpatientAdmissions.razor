@@ -1,0 +1,647 @@
+@page "/inpatient/admissions"
+@using HospitalManagement.Contracts.Inpatient
+@using HospitalManagement.Web.Client.Inpatient
+@inject IInpatientApiClient InpatientApi
+
+<div class="container-fluid py-3">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <div>
+            <h2 class="fw-bold mb-0">Yatış Kabul & İşlemleri</h2>
+            <p class="text-muted mb-0">Hasta yatış istemleri, kabul onayları, ilk yatak ataması ve bakım detayları.</p>
+        </div>
+        <div class="d-flex gap-2">
+            <button class="btn btn-primary" @onclick="OpenNewAdmissionModal">
+                <i class="bi bi-plus-circle me-1"></i> Yeni Yatış İstemi
+            </button>
+            <button class="btn btn-outline-primary" @onclick="RefreshDataAsync">
+                <i class="bi bi-arrow-clockwise me-1"></i> Yenile
+            </button>
+        </div>
+    </div>
+
+    @if (!string.IsNullOrWhiteSpace(_successMessage))
+    {
+        <div class="alert alert-success alert-dismissible fade show" role="alert">
+            <i class="bi bi-check-circle-fill me-2"></i>@_successMessage
+            <button type="button" class="btn-close" @onclick="() => _successMessage = null"></button>
+        </div>
+    }
+
+    @if (!string.IsNullOrWhiteSpace(_errorMessage))
+    {
+        <div class="alert alert-danger alert-dismissible fade show" role="alert">
+            <i class="bi bi-exclamation-triangle-fill me-2"></i>@_errorMessage
+            <button type="button" class="btn-close" @onclick="() => _errorMessage = null"></button>
+        </div>
+    }
+
+    <!-- Filtreler -->
+    <div class="card shadow-sm border-0 mb-4">
+        <div class="card-body">
+            <div class="row g-3 align-items-center">
+                <div class="col-md-4">
+                    <label class="form-label small fw-semibold">Yatış Durumu</label>
+                    <select class="form-select" @bind="_selectedStatus" @bind:after="RefreshDataAsync">
+                        <option value="">Tüm Durumlar</option>
+                        <option value="Requested">Yatış İstemi Verildi (Onay Bekliyor)</option>
+                        <option value="Accepted">Kabul Edildi (Yatak Bekliyor)</option>
+                        <option value="Admitted">Yatakta / Aktif Yatış</option>
+                        <option value="Discharged">Taburcu Edildi</option>
+                        <option value="Cancelled">İptal Edildi</option>
+                    </select>
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label small fw-semibold">Servis</label>
+                    <select class="form-select" @bind="_selectedWardId" @bind:after="RefreshDataAsync">
+                        <option value="">Tüm Servisler</option>
+                        @foreach (var w in _wards)
+                        {
+                            <option value="@w.Id">@w.Name (@w.Building - @w.Floor)</option>
+                        }
+                    </select>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    @if (_isLoading)
+    {
+        <div class="text-center py-5">
+            <div class="spinner-border text-primary" role="status">
+                <span class="visually-hidden">Yükleniyor...</span>
+            </div>
+            <p class="text-muted mt-2">Yatış kayıtları alınıyor...</p>
+        </div>
+    }
+    else if (_admissions.Count == 0)
+    {
+        <div class="alert alert-info">Kriterlere uygun yatış kaydı bulunamadı.</div>
+    }
+    else
+    {
+        <div class="card shadow-sm border-0">
+            <div class="table-responsive">
+                <table class="table table-hover align-middle mb-0">
+                    <thead class="table-light">
+                        <tr>
+                            <th>Yatış Numarası</th>
+                            <th>Hasta ID</th>
+                            <th>Servis & Yatak</th>
+                            <th>Durum</th>
+                            <th>Diyet & Düşme Riski</th>
+                            <th>İstem Tarihi</th>
+                            <th class="text-end">İşlemler</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var adm in _admissions)
+                        {
+                            <tr>
+                                <td>
+                                    <div class="fw-bold">@adm.AdmissionNumber</div>
+                                    <small class="text-muted">@adm.AdmissionReason</small>
+                                </td>
+                                <td>
+                                    <span class="font-monospace small">@adm.PatientId.ToString().Substring(0, 8)...</span>
+                                </td>
+                                <td>
+                                    <div class="fw-semibold">@adm.WardName</div>
+                                    @if (!string.IsNullOrWhiteSpace(adm.BedNumber))
+                                    {
+                                        <span class="badge bg-primary">Oda: @adm.RoomNumber | Yatak: @adm.BedNumber</span>
+                                    }
+                                    else
+                                    {
+                                        <span class="badge bg-warning text-dark">Yatak Atanmadı</span>
+                                    }
+                                </td>
+                                <td>
+                                    @RenderStatusBadge(adm.Status)
+                                </td>
+                                <td>
+                                    <span class="badge bg-light text-dark border me-1">@adm.DietType</span>
+                                    <span class="badge bg-secondary">Düşme Skoru: @adm.FallRiskScore</span>
+                                    @if (adm.IsolationRequired != "None")
+                                    {
+                                        <span class="badge bg-danger ms-1">@adm.IsolationRequired</span>
+                                    }
+                                </td>
+                                <td>
+                                    @adm.RequestedAtUtc.ToLocalTime().ToString("dd.MM.yyyy HH:mm")
+                                </td>
+                                <td class="text-end">
+                                    <div class="btn-group btn-group-sm">
+                                        @if (adm.Status == "Requested")
+                                        {
+                                            <button class="btn btn-outline-success" @onclick="() => AcceptAdmissionAsync(adm.Id)">
+                                                <i class="bi bi-check2 me-1"></i> Kabul Et
+                                            </button>
+                                            <button class="btn btn-outline-danger" @onclick="() => OpenCancelModal(adm)">
+                                                <i class="bi bi-x-circle me-1"></i> İptal
+                                            </button>
+                                        }
+                                        else if (adm.Status == "Accepted")
+                                        {
+                                            <button class="btn btn-outline-primary" @onclick="() => OpenAdmitModal(adm)">
+                                                <i class="bi bi-box-arrow-in-right me-1"></i> Yatağa Al
+                                            </button>
+                                            <button class="btn btn-outline-danger" @onclick="() => OpenCancelModal(adm)">
+                                                <i class="bi bi-x-circle me-1"></i> İptal
+                                            </button>
+                                        }
+                                        else if (adm.Status == "Admitted")
+                                        {
+                                            <button class="btn btn-outline-secondary" @onclick="() => OpenCareDetailsModal(adm)">
+                                                <i class="bi bi-heart-pulse me-1"></i> Bakım Detayı
+                                            </button>
+                                        }
+                                    </div>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    }
+</div>
+
+<!-- Modal: Yeni Yatış İstemi -->
+@if (_showNewAdmissionModal)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal-dialog modal-lg modal-dialog-centered">
+            <div class="modal-content border-0 shadow">
+                <div class="modal-header bg-primary text-white">
+                    <h5 class="modal-title"><i class="bi bi-clipboard-plus me-2"></i>Yeni Hasta Yatış İstemi</h5>
+                    <button type="button" class="btn-close btn-close-white" @onclick="() => _showNewAdmissionModal = false"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <label class="form-label fw-semibold">Hasta ID (GUID):</label>
+                            <input type="text" class="form-control" @bind="_newPatientId" placeholder="00000000-0000-0000-0000-000000000109" />
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label fw-semibold">Sorumlu Hekim ID (GUID):</label>
+                            <input type="text" class="form-control" @bind="_newAttendingDoctorId" placeholder="00000000-0000-0000-0000-000000000102" />
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label fw-semibold">Yatış Servisi:</label>
+                            <select class="form-select" @bind="_newWardId" @bind:after="OnNewWardSelectedAsync">
+                                <option value="">-- Servis Seçiniz --</option>
+                                @foreach (var w in _wards)
+                                {
+                                    <option value="@w.Id">@w.Name (@w.Building - @w.Floor)</option>
+                                }
+                            </select>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label fw-semibold">İlk Yatak Seçimi (Opsiyonel):</label>
+                            <select class="form-select" @bind="_newInitialBedId">
+                                <option value="">-- Servis Kabulünde Belirlensin --</option>
+                                @foreach (var b in _availableBedsForNewAdmission)
+                                {
+                                    <option value="@b.Id">Yatak @b.BedNumber</option>
+                                }
+                            </select>
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label fw-semibold">Yatış Endikasyonu / Gerekçesi:</label>
+                            <textarea class="form-control" rows="2" @bind="_newAdmissionReason" placeholder="Akut koroner sendrom ön tanısı ile yatış ve telemetri izlemi..."></textarea>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label fw-semibold">Tanı Kodu (ICD-10):</label>
+                            <input type="text" class="form-control" @bind="_newDiagnosisCode" placeholder="I20.0" />
+                        </div>
+                        <div class="col-md-8">
+                            <label class="form-label fw-semibold">Tanı Açıklaması:</label>
+                            <input type="text" class="form-control" @bind="_newDiagnosisDesc" placeholder="Anstabil Angina Pektoris" />
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label fw-semibold">Diyet Tipi:</label>
+                            <select class="form-select" @bind="_newDietType">
+                                <option value="Standard">Standart / Normal Diyet</option>
+                                <option value="Diabetic">Diyabetik Diyet</option>
+                                <option value="LowSodium">Tuzsuz / Düşük Sodyumlu</option>
+                                <option value="Renal">Böbrek / Renal Diyet</option>
+                                <option value="NPO">NPO (Aç Bırakma / Ağızdan Yasak)</option>
+                                <option value="Soft">Yumuşak / Sıvı Diyet</option>
+                            </select>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label fw-semibold">Düşme Riski Skoru (0-100):</label>
+                            <input type="number" class="form-control" @bind="_newFallRiskScore" min="0" max="100" />
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label fw-semibold">İzolasyon Gereksinimi:</label>
+                            <select class="form-select" @bind="_newIsolationRequired">
+                                <option value="None">Yok</option>
+                                <option value="Contact">Temas İzolasyonu</option>
+                                <option value="Droplet">Damlacık İzolasyonu</option>
+                                <option value="Airborne">Solunum İzolasyonu</option>
+                                <option value="Protective">Koruyucu İzolasyon</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" @onclick="() => _showNewAdmissionModal = false">Vazgeç</button>
+                    <button type="button" class="btn btn-primary" @onclick="SubmitNewAdmissionAsync">
+                        <i class="bi bi-check2-circle me-1"></i> Yatış İstemini Gönder
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+<!-- Modal: Yatağa Kabul Et -->
+@if (_showAdmitModal && _selectedAdmissionForAction != null)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content border-0 shadow">
+                <div class="modal-header bg-success text-white">
+                    <h5 class="modal-title"><i class="bi bi-box-arrow-in-right me-2"></i>Yatağa Kabul Onayı</h5>
+                    <button type="button" class="btn-close btn-close-white" @onclick="() => _showAdmitModal = false"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="alert alert-light border mb-3">
+                        <div><strong>Yatış No:</strong> @_selectedAdmissionForAction.AdmissionNumber</div>
+                        <div><strong>Servis:</strong> @_selectedAdmissionForAction.WardName</div>
+                        <div><strong>Gerekçe:</strong> @_selectedAdmissionForAction.AdmissionReason</div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">Yerleştirilecek Yatak:</label>
+                        <select class="form-select" @bind="_admitBedId">
+                            <option value="">-- Müsait Yatak Seçiniz --</option>
+                            @foreach (var b in _availableBedsForAdmit)
+                            {
+                                <option value="@b.Id">Yatak @b.BedNumber</option>
+                            }
+                        </select>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" @onclick="() => _showAdmitModal = false">Vazgeç</button>
+                    <button type="button" class="btn btn-success" @onclick="SubmitAdmitPatientAsync">
+                        <i class="bi bi-check-lg me-1"></i> Yatağa Yerleştir ve Aktif Et
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+<!-- Modal: Yatış İptali -->
+@if (_showCancelModal && _selectedAdmissionForAction != null)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content border-0 shadow">
+                <div class="modal-header bg-danger text-white">
+                    <h5 class="modal-title"><i class="bi bi-x-octagon me-2"></i>Yatış İstemi İptali</h5>
+                    <button type="button" class="btn-close btn-close-white" @onclick="() => _showCancelModal = false"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="alert alert-light border mb-3">
+                        <div><strong>Yatış No:</strong> @_selectedAdmissionForAction.AdmissionNumber</div>
+                        <div><strong>Hasta:</strong> @_selectedAdmissionForAction.PatientId</div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">İptal Gerekçesi:</label>
+                        <textarea class="form-control" rows="3" @bind="_cancelReason" placeholder="Hasta ayaktan tedaviye yönlendirildi..."></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" @onclick="() => _showCancelModal = false">Vazgeç</button>
+                    <button type="button" class="btn btn-danger" @onclick="SubmitCancelAdmissionAsync">
+                        <i class="bi bi-x-circle me-1"></i> İptali Onayla
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+<!-- Modal: Bakım Detayları Güncelleme -->
+@if (_showCareDetailsModal && _selectedAdmissionForAction != null)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content border-0 shadow">
+                <div class="modal-header bg-secondary text-white">
+                    <h5 class="modal-title"><i class="bi bi-heart-pulse me-2"></i>Bakım Detayları Güncelleme</h5>
+                    <button type="button" class="btn-close btn-close-white" @onclick="() => _showCareDetailsModal = false"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">Diyet Tipi:</label>
+                        <select class="form-select" @bind="_careDietType">
+                            <option value="Standard">Standart / Normal Diyet</option>
+                            <option value="Diabetic">Diyabetik Diyet</option>
+                            <option value="LowSodium">Tuzsuz / Düşük Sodyumlu</option>
+                            <option value="Renal">Böbrek / Renal Diyet</option>
+                            <option value="NPO">NPO (Aç Bırakma / Ağızdan Yasak)</option>
+                            <option value="Soft">Yumuşak / Sıvı Diyet</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">Düşme Riski Skoru:</label>
+                        <input type="number" class="form-control" @bind="_careFallRisk" min="0" max="100" />
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">İzolasyon Gereksinimi:</label>
+                        <select class="form-select" @bind="_careIsolation">
+                            <option value="None">Yok</option>
+                            <option value="Contact">Temas İzolasyonu</option>
+                            <option value="Droplet">Damlacık İzolasyonu</option>
+                            <option value="Airborne">Solunum İzolasyonu</option>
+                            <option value="Protective">Koruyucu İzolasyon</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" @onclick="() => _showCareDetailsModal = false">Vazgeç</button>
+                    <button type="button" class="btn btn-primary" @onclick="SubmitCareDetailsUpdateAsync">
+                        <i class="bi bi-save me-1"></i> Güncelle
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private bool _isLoading = true;
+    private string? _successMessage;
+    private string? _errorMessage;
+
+    private List<WardResponse> _wards = [];
+    private List<AdmissionSummaryResponse> _admissions = [];
+
+    private string _selectedStatus = "";
+    private string _selectedWardId = "";
+
+    // Modals
+    private bool _showNewAdmissionModal;
+    private string _newPatientId = "00000000-0000-0000-0000-000000000109";
+    private string _newAttendingDoctorId = "00000000-0000-0000-0000-000000000102";
+    private string _newWardId = "";
+    private string _newInitialBedId = "";
+    private string _newAdmissionReason = "Koroner arter hastalığı izlemi ve tedavi optimizasyonu.";
+    private string _newDiagnosisCode = "I25.1";
+    private string _newDiagnosisDesc = "Aterosklerotik Kalp Hastalığı";
+    private string _newDietType = "LowSodium";
+    private int _newFallRiskScore = 25;
+    private string _newIsolationRequired = "None";
+    private List<BedResponse> _availableBedsForNewAdmission = [];
+
+    private bool _showAdmitModal;
+    private AdmissionSummaryResponse? _selectedAdmissionForAction;
+    private string _admitBedId = "";
+    private List<BedResponse> _availableBedsForAdmit = [];
+
+    private bool _showCancelModal;
+    private string _cancelReason = "Hasta durumu ayaktan takibe uygun görüldü.";
+
+    private bool _showCareDetailsModal;
+    private string _careDietType = "Standard";
+    private int _careFallRisk;
+    private string _careIsolation = "None";
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadWardsAsync();
+        await RefreshDataAsync();
+    }
+
+    private async Task LoadWardsAsync()
+    {
+        try
+        {
+            _wards = await InpatientApi.GetWardsAsync();
+        }
+        catch
+        {
+            _wards = [];
+        }
+    }
+
+    private async Task RefreshDataAsync()
+    {
+        _isLoading = true;
+        _errorMessage = null;
+        try
+        {
+            Guid? wardFilter = Guid.TryParse(_selectedWardId, out var wid) ? wid : null;
+            _admissions = await InpatientApi.GetAdmissionsAsync(
+                wardId: wardFilter,
+                status: string.IsNullOrWhiteSpace(_selectedStatus) ? null : _selectedStatus);
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"Veriler yüklenirken hata oluştu: {ex.Message}";
+        }
+        finally
+        {
+            _isLoading = false;
+            StateHasChanged();
+        }
+    }
+
+    private void OpenNewAdmissionModal()
+    {
+        _showNewAdmissionModal = true;
+        if (_wards.Count > 0 && string.IsNullOrWhiteSpace(_newWardId))
+        {
+            _newWardId = _wards[0].Id.ToString();
+            _ = OnNewWardSelectedAsync();
+        }
+    }
+
+    private async Task OnNewWardSelectedAsync()
+    {
+        if (Guid.TryParse(_newWardId, out var wardId))
+        {
+            _availableBedsForNewAdmission = await InpatientApi.GetBedsAsync(wardId: wardId, status: "Available");
+        }
+        else
+        {
+            _availableBedsForNewAdmission = [];
+        }
+        StateHasChanged();
+    }
+
+    private async Task SubmitNewAdmissionAsync()
+    {
+        if (!Guid.TryParse(_newPatientId, out var patientId))
+        {
+            _errorMessage = "Geçerli bir Hasta ID giriniz.";
+            return;
+        }
+
+        if (!Guid.TryParse(_newAttendingDoctorId, out var docId))
+        {
+            _errorMessage = "Geçerli bir Sorumlu Hekim ID giriniz.";
+            return;
+        }
+
+        if (!Guid.TryParse(_newWardId, out var wardId))
+        {
+            _errorMessage = "Lütfen bir servis seçiniz.";
+            return;
+        }
+
+        Guid? initialBedId = Guid.TryParse(_newInitialBedId, out var bid) ? bid : null;
+
+        var req = new CreateAdmissionRequest
+        {
+            PatientId = patientId,
+            DepartmentId = Guid.Parse("30000000-0000-0000-0000-000000000003"), // Cardiology Department
+            AdmittingWardId = wardId,
+            AttendingDoctorId = docId,
+            AdmissionReason = _newAdmissionReason,
+            DiagnosisCode = _newDiagnosisCode,
+            DiagnosisDescription = _newDiagnosisDesc,
+            DietType = _newDietType,
+            FallRiskScore = _newFallRiskScore,
+            IsolationRequired = _newIsolationRequired,
+            InitialBedId = initialBedId,
+        };
+
+        var result = await InpatientApi.RequestAdmissionAsync(req);
+        if (result != null)
+        {
+            _showNewAdmissionModal = false;
+            _successMessage = $"Yatış istemi başarıyla oluşturuldu: {result.AdmissionNumber}";
+            await RefreshDataAsync();
+        }
+        else
+        {
+            _errorMessage = "Yatış istemi oluşturulamadı. Hastanın aktif yatışı olabilir veya seçilen yatak müsait değil.";
+        }
+    }
+
+    private async Task AcceptAdmissionAsync(Guid id)
+    {
+        var result = await InpatientApi.AcceptAdmissionAsync(id);
+        if (result != null)
+        {
+            _successMessage = $"Yatış kabul edildi: {result.AdmissionNumber}";
+            await RefreshDataAsync();
+        }
+        else
+        {
+            _errorMessage = "Yatış kabul işlemi başarısız oldu.";
+        }
+    }
+
+    private async Task OpenAdmitModal(AdmissionSummaryResponse adm)
+    {
+        _selectedAdmissionForAction = adm;
+        _showAdmitModal = true;
+        _availableBedsForAdmit = await InpatientApi.GetBedsAsync(wardId: adm.AdmittingWardId, status: "Available");
+        if (_availableBedsForAdmit.Count > 0)
+        {
+            _admitBedId = _availableBedsForAdmit[0].Id.ToString();
+        }
+    }
+
+    private async Task SubmitAdmitPatientAsync()
+    {
+        if (_selectedAdmissionForAction == null || !Guid.TryParse(_admitBedId, out var bedId))
+        {
+            _errorMessage = "Lütfen yerleştirilecek bir yatak seçiniz.";
+            return;
+        }
+
+        var result = await InpatientApi.AdmitPatientAsync(_selectedAdmissionForAction.Id, new AdmitPatientRequest { BedId = bedId });
+        if (result != null)
+        {
+            _showAdmitModal = false;
+            _successMessage = $"Hasta {result.BedNumber} numaralı yatağa başarıyla yerleştirildi.";
+            await RefreshDataAsync();
+        }
+        else
+        {
+            _errorMessage = "Yatağa kabul işlemi başarısız oldu. Yatak müsait olmayabilir.";
+        }
+    }
+
+    private void OpenCancelModal(AdmissionSummaryResponse adm)
+    {
+        _selectedAdmissionForAction = adm;
+        _showCancelModal = true;
+    }
+
+    private async Task SubmitCancelAdmissionAsync()
+    {
+        if (_selectedAdmissionForAction == null) return;
+
+        var result = await InpatientApi.CancelAdmissionAsync(_selectedAdmissionForAction.Id, new CancelAdmissionRequest { Reason = _cancelReason });
+        if (result != null)
+        {
+            _showCancelModal = false;
+            _successMessage = $"Yatış istemi ({result.AdmissionNumber}) iptal edildi.";
+            await RefreshDataAsync();
+        }
+        else
+        {
+            _errorMessage = "İptal işlemi başarısız oldu.";
+        }
+    }
+
+    private void OpenCareDetailsModal(AdmissionSummaryResponse adm)
+    {
+        _selectedAdmissionForAction = adm;
+        _careDietType = adm.DietType;
+        _careFallRisk = adm.FallRiskScore;
+        _careIsolation = adm.IsolationRequired;
+        _showCareDetailsModal = true;
+    }
+
+    private async Task SubmitCareDetailsUpdateAsync()
+    {
+        if (_selectedAdmissionForAction == null) return;
+
+        var req = new UpdateCareDetailsRequest
+        {
+            AttendingDoctorId = _selectedAdmissionForAction.AttendingDoctorId,
+            DietType = _careDietType,
+            FallRiskScore = _careFallRisk,
+            IsolationRequired = _careIsolation,
+        };
+
+        var result = await InpatientApi.UpdateCareDetailsAsync(_selectedAdmissionForAction.Id, req);
+        if (result != null)
+        {
+            _showCareDetailsModal = false;
+            _successMessage = "Bakım detayları güncellendi.";
+            await RefreshDataAsync();
+        }
+        else
+        {
+            _errorMessage = "Bakım detayları güncellenemedi.";
+        }
+    }
+
+    private static RenderFragment RenderStatusBadge(string status) => builder =>
+    {
+        var (cls, text) = status switch
+        {
+            "Requested" => ("bg-warning text-dark", "İstem Verildi"),
+            "Accepted" => ("bg-info text-dark", "Kabul Edildi (Yatak Bekliyor)"),
+            "Admitted" => ("bg-success text-white", "Yatakta / Aktif"),
+            "Discharged" => ("bg-secondary text-white", "Taburcu Edildi"),
+            "Cancelled" => ("bg-danger text-white", "İptal Edildi"),
+            _ => ("bg-light text-dark", status),
+        };
+
+        builder.OpenElement(0, "span");
+        builder.AddAttribute(1, "class", $"badge {cls}");
+        builder.AddContent(2, text);
+        builder.CloseElement();
+    };
+}

@@ -1,0 +1,53 @@
+<section class="ui-state ui-state--@Tone"
+         role="@Role"
+         aria-live="@AriaLive"
+         aria-busy="@IsBusy.ToString().ToLowerInvariant()">
+    <span class="ui-state__icon" aria-hidden="true">@Icon</span>
+    <div class="ui-state__content">
+        <h2 class="ui-state__title">@Title</h2>
+        <p class="ui-state__description">@Description</p>
+
+        @if (!string.IsNullOrWhiteSpace(ActionText) && OnAction.HasDelegate)
+        {
+            <button class="ui-button ui-button--secondary" type="button" @onclick="OnAction">
+                @ActionText
+            </button>
+        }
+        else if (!string.IsNullOrWhiteSpace(ActionText) && !string.IsNullOrWhiteSpace(ActionHref))
+        {
+            <a class="ui-button ui-button--secondary" href="@ActionHref">@ActionText</a>
+        }
+    </div>
+</section>
+
+@code {
+    [Parameter, EditorRequired]
+    public string Title { get; set; } = string.Empty;
+
+    [Parameter, EditorRequired]
+    public string Description { get; set; } = string.Empty;
+
+    [Parameter]
+    public string Tone { get; set; } = "neutral";
+
+    [Parameter]
+    public string Role { get; set; } = "status";
+
+    [Parameter]
+    public string AriaLive { get; set; } = "polite";
+
+    [Parameter]
+    public bool IsBusy { get; set; }
+
+    [Parameter]
+    public string Icon { get; set; } = "•";
+
+    [Parameter]
+    public string? ActionText { get; set; }
+
+    [Parameter]
+    public string? ActionHref { get; set; }
+
+    [Parameter]
+    public EventCallback OnAction { get; set; }
+}

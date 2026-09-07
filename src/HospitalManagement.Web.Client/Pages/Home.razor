@@ -1,0 +1,221 @@
+@page "/"
+@inject IStringLocalizer<SharedResources> Localizer
+@inject UserSessionState SessionState
+@inject NavigationManager Navigation
+
+<PageTitle>@Localizer["HomePageTitle"]</PageTitle>
+
+<header class="page-heading page-heading--hero">
+    <span class="page-eyebrow">@Localizer["HomeEyebrow"]</span>
+    <h1>@Localizer["HomeHeading"]</h1>
+    <p>@Localizer["HomeDescription"]</p>
+    
+    <div style="display:flex; gap:0.75rem; flex-wrap:wrap; margin-top:1rem;">
+        @if (SessionState.IsAuthenticated)
+        {
+            <button class="ui-button ui-button--primary" type="button" @onclick="GoToRoleHome">
+                Çalışma Alanıma Git (@SessionState.GetRoleDisplayName())
+                <span aria-hidden="true">→</span>
+            </button>
+        }
+        else
+        {
+            <a class="ui-button ui-button--primary" href="account/login">
+                Sisteme Giriş Yap
+                <span aria-hidden="true">→</span>
+            </a>
+            <a class="ui-button ui-button--secondary" href="ui-states">
+                Durum bileşenlerini incele
+            </a>
+            <a class="ui-button ui-button--secondary" href="account/register">
+                Yeni Hasta Hesabı Oluştur
+            </a>
+        }
+    </div>
+</header>
+
+@if (SessionState.IsAuthenticated)
+{
+    <section class="dashboard-section" aria-labelledby="role-shortcuts-heading">
+        <div class="section-heading">
+            <div>
+                <span class="page-eyebrow">Hızlı İşlemler</span>
+                <h2 id="role-shortcuts-heading">@SessionState.GetRoleDisplayName() Çalışma Alanı</h2>
+            </div>
+            <p>Rolünüze özel tanımlanmış modüllere ve işlemlere buradan hızla erişebilirsiniz.</p>
+        </div>
+
+        <div class="metric-grid">
+            @if (SessionState.IsPatient)
+            {
+                <a class="metric-card" href="patient/appointments/book" style="text-decoration:none; cursor:pointer;">
+                    <span style="font-weight:600; color:#0369a1;">Randevu Al</span>
+                    <strong style="font-size:1.25rem;">Yeni Randevu</strong>
+                    <small>Poliklinik ve hekim seçimi</small>
+                </a>
+                <a class="metric-card" href="patient/appointments" style="text-decoration:none; cursor:pointer;">
+                    <span style="font-weight:600; color:#0369a1;">Randevularım</span>
+                    <strong style="font-size:1.25rem;">Kayıtlı Randevular</strong>
+                    <small>Randevu takibi ve iptal</small>
+                </a>
+                <a class="metric-card" href="notifications" style="text-decoration:none; cursor:pointer;">
+                    <span style="font-weight:600; color:#0369a1;">Bildirimler</span>
+                    <strong style="font-size:1.25rem;">Duyurular & Sıra</strong>
+                    <small>Onay ve sıra bildirimleri</small>
+                </a>
+            }
+            else if (SessionState.IsRegistrationStaff)
+            {
+                <a class="metric-card" href="staff/queue" style="text-decoration:none; cursor:pointer;">
+                    <span style="font-weight:600; color:#0369a1;">Günlük Sıra</span>
+                    <strong style="font-size:1.25rem;">Check-In & Sıra</strong>
+                    <small>Giriş yapma ve bilet üretimi</small>
+                </a>
+                <a class="metric-card" href="staff/patients" style="text-decoration:none; cursor:pointer;">
+                    <span style="font-weight:600; color:#0369a1;">Hasta Kayıt</span>
+                    <strong style="font-size:1.25rem;">Hasta Kabul</strong>
+                    <small>Arama ve yeni hasta kaydı</small>
+                </a>
+                <a class="metric-card" href="notifications" style="text-decoration:none; cursor:pointer;">
+                    <span style="font-weight:600; color:#0369a1;">Bildirimler</span>
+                    <strong style="font-size:1.25rem;">İletişim</strong>
+                    <small>Sistem bildirimleri</small>
+                </a>
+            }
+            else if (SessionState.IsDoctor)
+            {
+                <a class="metric-card" href="staff/queue" style="text-decoration:none; cursor:pointer;">
+                    <span style="font-weight:600; color:#0369a1;">Muayene Sırası</span>
+                    <strong style="font-size:1.25rem;">Günün Hastaları</strong>
+                    <small>Bekleyen ve çağrılan hastalar</small>
+                </a>
+                <a class="metric-card" href="staff/patients" style="text-decoration:none; cursor:pointer;">
+                    <span style="font-weight:600; color:#0369a1;">Hasta Arama</span>
+                    <strong style="font-size:1.25rem;">Hasta Dosyaları</strong>
+                    <small>MRN ve kimlik arama</small>
+                </a>
+                <a class="metric-card" href="notifications" style="text-decoration:none; cursor:pointer;">
+                    <span style="font-weight:600; color:#0369a1;">Bildirimler</span>
+                    <strong style="font-size:1.25rem;">Mesajlar</strong>
+                    <small>Klinik bildirimler</small>
+                </a>
+            }
+            else if (SessionState.IsSystemAdmin || SessionState.IsHospitalManager)
+            {
+                <a class="metric-card" href="admin/users" style="text-decoration:none; cursor:pointer;">
+                    <span style="font-weight:600; color:#0369a1;">Kullanıcı Yönetimi</span>
+                    <strong style="font-size:1.25rem;">Roller & Yetkiler</strong>
+                    <small>Kullanıcı aktifleştirme/rol atama</small>
+                </a>
+                <a class="metric-card" href="staff/queue" style="text-decoration:none; cursor:pointer;">
+                    <span style="font-weight:600; color:#0369a1;">Sıra Takibi</span>
+                    <strong style="font-size:1.25rem;">Genel Sıra</strong>
+                    <small>Poliklinik sıra durumu</small>
+                </a>
+                <a class="metric-card" href="staff/patients" style="text-decoration:none; cursor:pointer;">
+                    <span style="font-weight:600; color:#0369a1;">Hasta Listesi</span>
+                    <strong style="font-size:1.25rem;">Hasta Kayıtları</strong>
+                    <small>Tüm kayıtlar</small>
+                </a>
+            }
+        </div>
+    </section>
+}
+
+<section class="dashboard-section" aria-labelledby="example-metrics-heading">
+    <div class="section-heading">
+        <div>
+            <span class="page-eyebrow">DEMO</span>
+            <h2 id="example-metrics-heading">@Localizer["ExampleMetrics"]</h2>
+        </div>
+        <p>@Localizer["ExampleMetricsDescription"]</p>
+    </div>
+
+    <div class="metric-grid">
+        <article class="metric-card">
+            <span>@Localizer["AppointmentsToday"]</span>
+            <strong>24</strong>
+            <small>DEMO</small>
+        </article>
+        <article class="metric-card">
+            <span>@Localizer["PendingResults"]</span>
+            <strong>7</strong>
+            <small>DEMO</small>
+        </article>
+        <article class="metric-card">
+            <span>@Localizer["ActiveAdmissions"]</span>
+            <strong>12</strong>
+            <small>DEMO</small>
+        </article>
+        <article class="metric-card">
+            <span>@Localizer["PrescriptionsToDispense"]</span>
+            <strong>5</strong>
+            <small>DEMO</small>
+        </article>
+    </div>
+</section>
+
+<section class="dashboard-section" aria-labelledby="planned-modules-heading">
+    <div class="section-heading">
+        <div>
+            <span class="page-eyebrow">Yol Haritası</span>
+            <h2 id="planned-modules-heading">@Localizer["PlannedModules"]</h2>
+        </div>
+        <p>@Localizer["PlannedModulesDescription"]</p>
+    </div>
+
+    <div class="module-grid">
+        <article class="module-card">
+            <span class="module-card__index">01</span>
+            <div>
+                <h3>@Localizer["PatientAndAppointment"]</h3>
+                <p>@Localizer["PatientAndAppointmentDescription"]</p>
+                <span class="module-card__status" style="background:#dcfce7; color:#166534;">Aktif (Faz 3 Tamamlandı)</span>
+            </div>
+        </article>
+        <article class="module-card">
+            <span class="module-card__index">02</span>
+            <div>
+                <h3>@Localizer["ClinicalCare"]</h3>
+                <p>@Localizer["ClinicalCareDescription"]</p>
+                <span class="module-card__status">@Localizer["ComingInLaterPhase"]</span>
+            </div>
+        </article>
+        <article class="module-card">
+            <span class="module-card__index">03</span>
+            <div>
+                <h3>@Localizer["Diagnostics"]</h3>
+                <p>@Localizer["DiagnosticsDescription"]</p>
+                <span class="module-card__status">@Localizer["ComingInLaterPhase"]</span>
+            </div>
+        </article>
+        <article class="module-card">
+            <span class="module-card__index">04</span>
+            <div>
+                <h3>@Localizer["PharmacyAndInventory"]</h3>
+                <p>@Localizer["PharmacyAndInventoryDescription"]</p>
+                <span class="module-card__status">@Localizer["ComingInLaterPhase"]</span>
+            </div>
+        </article>
+    </div>
+</section>
+
+<aside class="security-callout" aria-labelledby="security-callout-heading">
+    <span class="security-callout__icon" aria-hidden="true">✓</span>
+    <div>
+        <h2 id="security-callout-heading">@Localizer["SecurityCalloutTitle"]</h2>
+        <p>@Localizer["SecurityCalloutDescription"]</p>
+    </div>
+</aside>
+
+@code {
+    protected override async Task OnInitializedAsync()
+    {
+        await SessionState.EnsureLoadedAsync();
+    }
+
+    private void GoToRoleHome()
+    {
+        Navigation.NavigateTo(SessionState.GetHomeRouteForCurrentRole());
+    }
+}

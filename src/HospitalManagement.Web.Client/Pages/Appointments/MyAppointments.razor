@@ -1,0 +1,240 @@
+@page "/patient/appointments"
+@page "/my-appointments"
+@inject ISchedulingApiClient SchedulingApi
+@inject UserSessionState SessionState
+@inject NavigationManager Navigation
+
+<PageTitle>Randevularım — Hastane Yönetim Sistemi</PageTitle>
+
+<header class="page-heading" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: var(--hys-space-3);">
+    <div>
+        <span class="page-eyebrow">Hasta Portalı</span>
+        <h1 class="page-title">Randevularım</h1>
+        <p class="page-subtitle">Geçmiş ve yaklaşan tüm muayene randevularınızı takip edin.</p>
+    </div>
+    <a class="ui-button ui-button--primary" href="/patient/appointments/book">+ Yeni Randevu Al</a>
+</header>
+
+@if (_isLoading)
+{
+    <LoadingState />
+}
+else if (_isForbidden)
+{
+    <ForbiddenState ActionText="Genel Bakışa Dön" ActionHref="/" />
+}
+else if (_appointments is null || _appointments.Count == 0)
+{
+    <EmptyState ActionText="İlk Randevunuzu Alın" ActionHref="/patient/appointments/book" />
+}
+else
+{
+    @if (!string.IsNullOrWhiteSpace(_statusMessage))
+    {
+        <div class="ui-state ui-state--success" role="status" style="padding: var(--hys-space-3); border-radius: var(--hys-radius-md); background: #dcfce7; color: #166534; margin-bottom: var(--hys-space-4);">
+            @_statusMessage
+        </div>
+    }
+
+    @if (!string.IsNullOrWhiteSpace(_errorMessage))
+    {
+        <div class="ui-state ui-state--danger" role="alert" style="padding: var(--hys-space-3); border-radius: var(--hys-radius-md); background: #fee2e2; color: #991b1b; margin-bottom: var(--hys-space-4);">
+            @_errorMessage
+        </div>
+    }
+
+    <div style="background: var(--hys-color-surface); border: 1px solid var(--hys-color-border); border-radius: var(--hys-radius-lg); overflow-x: auto;">
+        <table class="ui-table" style="width: 100%; border-collapse: collapse; text-align: left;">
+            <thead>
+                <tr style="border-bottom: 1px solid var(--hys-color-border); background: var(--hys-color-bg);">
+                    <th style="padding: var(--hys-space-3);">Randevu Tarihi</th>
+                    <th style="padding: var(--hys-space-3);">Poliklinik / Hekim</th>
+                    <th style="padding: var(--hys-space-3);">Geliş Nedeni</th>
+                    <th style="padding: var(--hys-space-3);">Durum</th>
+                    <th style="padding: var(--hys-space-3);">İşlemler</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var appt in _appointments)
+                {
+                    <tr style="border-bottom: 1px solid var(--hys-color-border);">
+                        <td style="padding: var(--hys-space-3); font-weight: 500;">
+                            @appt.AppointmentTimeUtc.ToLocalTime().ToString("dd MMMM yyyy HH:mm")
+                        </td>
+                        <td style="padding: var(--hys-space-3);">
+                            Kardiyoloji Polikliniği<br />
+                            <small style="color: var(--hys-color-muted);">Prof. Dr. Ayşe Yılmaz</small>
+                        </td>
+                        <td style="padding: var(--hys-space-3); max-width: 200px;">
+                            @(string.IsNullOrWhiteSpace(appt.ReasonForVisit) ? "-" : appt.ReasonForVisit)
+                        </td>
+                        <td style="padding: var(--hys-space-3);">
+                            <span class="ui-badge @GetStatusBadgeClass(appt.Status)" style="padding: 2px 8px; border-radius: var(--hys-radius-sm); font-size: 0.75rem; font-weight: 600;">
+                                @GetStatusLabel(appt.Status)
+                            </span>
+                        </td>
+                        <td style="padding: var(--hys-space-3);">
+                            @if (appt.Status == "Confirmed")
+                            {
+                                <button class="ui-button ui-button--danger" type="button" style="padding: var(--hys-space-2) var(--hys-space-3); font-size: 0.875rem;"
+                                        @onclick="() => OpenCancelModal(appt)">
+                                    İptal Et
+                                </button>
+                            }
+                            else if (appt.Status == "Cancelled" && !string.IsNullOrWhiteSpace(appt.CancellationReason))
+                            {
+                                <small style="color: var(--hys-color-muted);">İptal: @appt.CancellationReason</small>
+                            }
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
+
+<!-- İptal Onay Modalı -->
+@if (_appointmentToCancel is not null)
+{
+    <div class="ui-modal-backdrop" style="position: fixed; inset: 0; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 50;">
+        <div class="ui-modal" style="background: var(--hys-color-surface); padding: var(--hys-space-6); border-radius: var(--hys-radius-lg); max-width: 480px; width: 90%;">
+            <h2 style="font-size: 1.25rem; font-weight: 600; margin-bottom: var(--hys-space-3);">Randevu İptal Onayı</h2>
+            <p style="color: var(--hys-color-muted); margin-bottom: var(--hys-space-4);">
+                <strong>@_appointmentToCancel.AppointmentTimeUtc.ToLocalTime().ToString("dd MMMM yyyy HH:mm")</strong> tarihindeki randevunuzu iptal etmek istediğinizden emin misiniz?
+            </p>
+
+            <div style="margin-bottom: var(--hys-space-4);">
+                <label class="ui-label" for="cancelReason">İptal Gerekçesi</label>
+                <input id="cancelReason" type="text" class="ui-input" @bind="_cancellationReason" placeholder="İptal nedeninizi yazınız..." />
+            </div>
+
+            <div style="display: flex; gap: var(--hys-space-3); justify-content: flex-end;">
+                <button class="ui-button ui-button--secondary" type="button" @onclick="CloseCancelModal">Vazgeç</button>
+                <button class="ui-button ui-button--danger" type="button" disabled="@_isCancelling" @onclick="ConfirmCancelAsync">
+                    @(_isCancelling ? "İptal Ediliyor..." : "Randevuyu İptal Et")
+                </button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private IReadOnlyList<AppointmentDetailResponse>? _appointments;
+    private bool _isLoading = true;
+    private bool _isForbidden;
+    private bool _isCancelling;
+    private string? _errorMessage;
+    private string? _statusMessage;
+
+    private Guid? _patientPersonId;
+    private AppointmentDetailResponse? _appointmentToCancel;
+    private string _cancellationReason = "Hasta İsteği";
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadAppointmentsAsync();
+    }
+
+    private async Task LoadAppointmentsAsync()
+    {
+        _isLoading = true;
+        _errorMessage = null;
+        _isForbidden = false;
+
+        try
+        {
+            await SessionState.EnsureLoadedAsync();
+            if (!SessionState.IsAuthenticated || !SessionState.IsPatient || !Guid.TryParse(SessionState.PersonId, out var pid))
+            {
+                Navigation.NavigateTo("account/login");
+                return;
+            }
+
+            _patientPersonId = pid;
+            _appointments = await SchedulingApi.GetPatientAppointmentsAsync(pid);
+            if (_appointments is null)
+            {
+                _isForbidden = true;
+            }
+        }
+        catch
+        {
+            _isForbidden = true;
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+    }
+
+    private void OpenCancelModal(AppointmentDetailResponse appointment)
+    {
+        _appointmentToCancel = appointment;
+        _cancellationReason = "Hasta İsteği";
+    }
+
+    private void CloseCancelModal()
+    {
+        _appointmentToCancel = null;
+    }
+
+    private async Task ConfirmCancelAsync()
+    {
+        if (_appointmentToCancel is null)
+        {
+            return;
+        }
+
+        _isCancelling = true;
+        _errorMessage = null;
+        _statusMessage = null;
+
+        try
+        {
+            var result = await SchedulingApi.CancelAppointmentAsync(
+                _appointmentToCancel.Id,
+                new CancelAppointmentRequest { Reason = _cancellationReason });
+
+            if (result is null)
+            {
+                _errorMessage = "Randevu iptal edilemedi.";
+            }
+            else
+            {
+                _statusMessage = "Randevunuz başarıyla iptal edildi.";
+                _appointmentToCancel = null;
+                await LoadAppointmentsAsync();
+            }
+        }
+        catch (Exception)
+        {
+            _errorMessage = "İptal işlemi tamamlanamadı. Lütfen bağlantınızı kontrol edip yeniden deneyin.";
+        }
+        finally
+        {
+            _isCancelling = false;
+        }
+    }
+
+    private static string GetStatusLabel(string status) => status switch
+    {
+        "Draft" => "Taslak",
+        "Reserved" => "Ayrıldı",
+        "Confirmed" => "Onaylandı",
+        "CheckedIn" => "Giriş Yapıldı",
+        "Completed" => "Tamamlandı",
+        "Cancelled" => "İptal Edildi",
+        "NoShow" => "Gelmedi",
+        _ => status,
+    };
+
+    private static string GetStatusBadgeClass(string status) => status switch
+    {
+        "Confirmed" => "ui-badge--success",
+        "CheckedIn" => "ui-badge--primary",
+        "Completed" => "ui-badge--neutral",
+        "Cancelled" => "ui-badge--danger",
+        "NoShow" => "ui-badge--warning",
+        _ => "ui-badge--neutral",
+    };
+}

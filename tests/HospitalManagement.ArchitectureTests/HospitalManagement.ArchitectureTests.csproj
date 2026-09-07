@@ -1,0 +1,46 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <Description>Automated dependency and module-boundary tests.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="coverlet.collector">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="TngTech.ArchUnitNET.xUnit" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+    <ProjectReference Include="../../src/HospitalManagement.BuildingBlocks/HospitalManagement.BuildingBlocks.csproj" />
+    <ProjectReference Include="../../src/HospitalManagement.Contracts/HospitalManagement.Contracts.csproj" />
+    <ProjectReference Include="../../src/HospitalManagement.UI/HospitalManagement.UI.csproj" />
+    <ProjectReference Include="../../src/HospitalManagement.Web.Client/HospitalManagement.Web.Client.csproj" />
+    <ProjectReference Include="../../src/HospitalManagement.Host/HospitalManagement.Host.csproj" />
+    <ProjectReference Include="../../src/Modules/IdentityAccess/HospitalManagement.Modules.IdentityAccess.csproj" />
+    <ProjectReference Include="../../src/Modules/Organization/HospitalManagement.Modules.Organization.csproj" />
+    <ProjectReference Include="../../src/Modules/Patients/HospitalManagement.Modules.Patients.csproj" />
+    <ProjectReference Include="../../src/Modules/Scheduling/HospitalManagement.Modules.Scheduling.csproj" />
+    <ProjectReference Include="../../src/Modules/ClinicalRecords/HospitalManagement.Modules.ClinicalRecords.csproj" />
+    <ProjectReference Include="../../src/Modules/Pharmacy/HospitalManagement.Modules.Pharmacy.csproj" />
+    <ProjectReference Include="../../src/Modules/Diagnostics/HospitalManagement.Modules.Diagnostics.csproj" />
+    <ProjectReference Include="../../src/Modules/Inpatient/HospitalManagement.Modules.Inpatient.csproj" />
+    <ProjectReference Include="../../src/Modules/Emergency/HospitalManagement.Modules.Emergency.csproj" />
+    <ProjectReference Include="../../src/Modules/SurgeryCriticalCare/HospitalManagement.Modules.SurgeryCriticalCare.csproj" />
+    <ProjectReference Include="../../src/Modules/SpecialtyCare/HospitalManagement.Modules.SpecialtyCare.csproj" />
+    <ProjectReference Include="../../src/Modules/Inventory/HospitalManagement.Modules.Inventory.csproj" />
+    <ProjectReference Include="../../src/Modules/Notifications/HospitalManagement.Modules.Notifications.csproj" />
+    <ProjectReference Include="../../src/Modules/Reporting/HospitalManagement.Modules.Reporting.csproj" />
+    <ProjectReference Include="../../src/Modules/Interoperability/HospitalManagement.Modules.Interoperability.csproj" />
+    <ProjectReference Include="../../src/Modules/AuditPrivacy/HospitalManagement.Modules.AuditPrivacy.csproj" />
+  </ItemGroup>
+</Project>

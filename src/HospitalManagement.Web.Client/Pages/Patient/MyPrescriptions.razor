@@ -1,0 +1,295 @@
+@page "/patient/prescriptions"
+@using HospitalManagement.Contracts.Pharmacy
+@using HospitalManagement.Web.Client.Identity
+@using HospitalManagement.Web.Client.Pharmacy
+@inject IPharmacyApiClient PharmacyApi
+@inject UserSessionState SessionState
+@inject NavigationManager Navigation
+
+<PageTitle>Reçetelerim — Hasta Portalı — Hastane Yönetim Sistemi</PageTitle>
+
+<header class="page-heading" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: var(--hys-space-3);">
+    <div>
+        <span class="page-eyebrow">Hasta Portalı</span>
+        <h1 class="page-title">Reçetelerim</h1>
+        <p class="page-subtitle">Hekiminiz tarafından düzenlenen reçetelerinizi, ilaç kullanım talimatlarınızı ve karşılama durumlarını inceleyin.</p>
+    </div>
+    <div>
+        <span class="ui-badge ui-badge--success" style="font-size: 0.875rem; padding: 6px 12px; border-radius: var(--hys-radius-md);">
+            Hasta Görünümü
+        </span>
+    </div>
+</header>
+
+<!-- Sentetik Demo Veri Uyarısı -->
+<div class="ui-state ui-state--warning" role="alert" style="padding: var(--hys-space-3); border-radius: var(--hys-radius-md); background: #fef3c7; border: 1px solid #f59e0b; color: #92400e; margin-bottom: var(--hys-space-4);">
+    <strong>EĞİTİM VE SİMÜLASYON ORTAMI:</strong> Bu ekranda görüntülenen tüm reçete ve ilaç bilgileri sentetik DEMO verilerdir. Gerçek bir tedavi veya tıbbi uygulama için kullanılamaz. Gerçek sağlık durumunuzla ilgili lütfen hekiminize danışınız.
+</div>
+
+@if (_isLoading)
+{
+    <LoadingState />
+}
+else if (_isForbidden)
+{
+    <ForbiddenState ActionText="Randevularıma Dön" ActionHref="patient/appointments" />
+}
+else
+{
+    <div style="display: flex; flex-direction: column; gap: var(--hys-space-4);">
+        @if (!string.IsNullOrWhiteSpace(_errorMessage))
+        {
+            <div class="ui-state ui-state--danger" role="alert" style="padding: var(--hys-space-3); border-radius: var(--hys-radius-md); background: #fee2e2; color: #991b1b;">
+                @_errorMessage
+            </div>
+        }
+
+        <!-- Reçete Listesi -->
+        @if (_prescriptions is null || _prescriptions.Count == 0)
+        {
+            <EmptyState Title="Reçeteniz Bulunmuyor" Description="Adınıza düzenlenmiş aktif veya geçmiş bir reçete kaydı bulunmamaktadır." />
+        }
+        else
+        {
+            <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: var(--hys-space-4);">
+                @foreach (var rx in _prescriptions)
+                {
+                    <article class="ui-panel" style="background: var(--hys-color-surface); border: 1px solid var(--hys-color-border); border-radius: var(--hys-radius-lg); padding: var(--hys-space-4); display: flex; flex-direction: column; justify-content: space-between; gap: var(--hys-space-3);">
+                        <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: var(--hys-space-2);">
+                            <div>
+                                <span style="font-size: 0.75rem; color: var(--hys-color-muted); font-weight: 600; text-transform: uppercase;">Reçete Numarası</span>
+                                <h2 style="font-size: 1.125rem; font-weight: 700; color: var(--hys-color-primary); margin: 2px 0;">
+                                    @rx.PrescriptionNumber
+                                </h2>
+                            </div>
+                            <span class="ui-badge @GetStatusBadgeClass(rx.Status)">
+                                @GetStatusDisplayText(rx.Status)
+                            </span>
+                        </div>
+
+                        <div style="display: flex; flex-direction: column; gap: 6px; font-size: 0.875rem;">
+                            <div style="display: flex; justify-content: space-between;">
+                                <span style="color: var(--hys-color-muted);">Düzenlenme Tarihi:</span>
+                                <span style="font-weight: 500;">@(rx.SignedAtUtc?.ToLocalTime().ToString("dd.MM.yyyy") ?? rx.CreatedAtUtc.ToLocalTime().ToString("dd.MM.yyyy"))</span>
+                            </div>
+                            <div style="display: flex; justify-content: space-between;">
+                                <span style="color: var(--hys-color-muted);">Geçerlilik Bitiş:</span>
+                                <span style="font-weight: 500;">@(rx.ValidUntilUtc?.ToLocalTime().ToString("dd.MM.yyyy") ?? "-")</span>
+                            </div>
+                            <div style="display: flex; justify-content: space-between;">
+                                <span style="color: var(--hys-color-muted);">İlaç Sayısı:</span>
+                                <span style="font-weight: 600;">@rx.ItemCount kalem</span>
+                            </div>
+                        </div>
+
+                        <div style="border-top: 1px solid var(--hys-color-border); padding-top: var(--hys-space-3); display: flex; justify-content: flex-end;">
+                            <button class="ui-button ui-button--secondary" type="button" style="width: 100%;" @onclick="() => OpenDetailModalAsync(rx.Id)">
+                                İlaçları ve Talimatları Gör
+                            </button>
+                        </div>
+                    </article>
+                }
+            </div>
+        }
+    </div>
+}
+
+<!-- Reçete Detay Modalı -->
+@if (_selectedPrescription is not null)
+{
+    <div style="position: fixed; inset: 0; background: rgba(0, 0, 0, 0.5); display: flex; align-items: center; justify-content: center; z-index: 9999; padding: var(--hys-space-3);">
+        <div style="background: var(--hys-color-surface); border-radius: var(--hys-radius-lg); width: 100%; max-width: 720px; max-height: 90vh; overflow-y: auto; padding: var(--hys-space-5); display: flex; flex-direction: column; gap: var(--hys-space-4);">
+            <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--hys-color-border); padding-bottom: var(--hys-space-3);">
+                <div>
+                    <h3 style="font-size: 1.25rem; font-weight: 700;">Reçete: @_selectedPrescription.PrescriptionNumber</h3>
+                    <div style="font-size: 0.8125rem; color: var(--hys-color-muted);">
+                        Tarih: @(_selectedPrescription.SignedAtUtc?.ToLocalTime().ToString("dd.MM.yyyy HH:mm") ?? "-") | Geçerlilik: @(_selectedPrescription.ValidUntilUtc?.ToLocalTime().ToString("dd.MM.yyyy") ?? "-")
+                    </div>
+                </div>
+                <span class="ui-badge @GetStatusBadgeClass(_selectedPrescription.Status)" style="font-size: 0.875rem; padding: 4px 10px;">
+                    @GetStatusDisplayText(_selectedPrescription.Status)
+                </span>
+            </div>
+
+            @if (!string.IsNullOrWhiteSpace(_selectedPrescription.GeneralInstructions))
+            {
+                <div style="background: #eff6ff; border-left: 3px solid #3b82f6; padding: var(--hys-space-3); border-radius: var(--hys-radius-md); font-size: 0.875rem; color: #1e40af;">
+                    <strong>Hekiminizin Genel Talimatı:</strong> @_selectedPrescription.GeneralInstructions
+                </div>
+            }
+
+            <div style="display: flex; flex-direction: column; gap: var(--hys-space-3);">
+                <h4 style="font-size: 1rem; font-weight: 600;">Reçetedeki İlaçlar (@_selectedPrescription.Items.Count)</h4>
+                @foreach (var item in _selectedPrescription.Items)
+                {
+                    <div style="border: 1px solid var(--hys-color-border); border-radius: var(--hys-radius-md); padding: var(--hys-space-3); background: var(--hys-color-bg); display: flex; flex-direction: column; gap: 6px;">
+                        <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+                            <div>
+                                <h5 style="font-size: 0.9375rem; font-weight: 700; color: var(--hys-color-text); margin: 0;">@item.BrandName</h5>
+                                <div style="font-size: 0.8125rem; color: var(--hys-color-muted);">Etken Madde: @item.GenericName</div>
+                            </div>
+                            <span class="ui-badge @(item.IsFullyDispensed ? "ui-badge--success" : (item.DispensedQuantity > 0 ? "ui-badge--warning" : "ui-badge--secondary"))" style="font-size: 0.75rem;">
+                                @(item.IsFullyDispensed ? "Eczaneden Alındı" : (item.DispensedQuantity > 0 ? $"{item.DispensedQuantity}/{item.Quantity} Alındı" : "Henüz Alınmadı"))
+                            </span>
+                        </div>
+
+                        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; font-size: 0.8125rem; margin-top: 4px;">
+                            <div>
+                                <span style="color: var(--hys-color-muted);">Kullanım Şekli:</span>
+                                <span style="font-weight: 600;">@GetFriendlyRoute(item.Route)</span>
+                            </div>
+                            <div>
+                                <span style="color: var(--hys-color-muted);">Doz / Sıklık:</span>
+                                <span style="font-weight: 600;">@item.Dose @item.DoseUnit — @GetFriendlyFrequency(item.Frequency)</span>
+                            </div>
+                            <div>
+                                <span style="color: var(--hys-color-muted);">Tedavi Süresi:</span>
+                                <span style="font-weight: 600;">@item.DurationDays Gün</span>
+                            </div>
+                            <div>
+                                <span style="color: var(--hys-color-muted);">Miktar:</span>
+                                <span style="font-weight: 600;">@item.Quantity @item.QuantityUnit</span>
+                            </div>
+                        </div>
+
+                        @if (!string.IsNullOrWhiteSpace(item.Instructions))
+                        {
+                            <div style="font-size: 0.8125rem; color: #475569; background: var(--hys-color-surface); padding: 6px 10px; border-radius: var(--hys-radius-sm); border: 1px dashed var(--hys-color-border);">
+                                <strong>Kullanım Notu:</strong> @item.Instructions
+                            </div>
+                        }
+                    </div>
+                }
+            </div>
+
+            <div style="display: flex; justify-content: flex-end; margin-top: var(--hys-space-2);">
+                <button class="ui-button ui-button--secondary" type="button" @onclick="() => _selectedPrescription = null">Kapat</button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private bool _isLoading = true;
+    private bool _isForbidden;
+    private string? _errorMessage;
+
+    private List<PrescriptionSummaryResponse>? _prescriptions;
+    private PrescriptionDetailResponse? _selectedPrescription;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await SessionState.EnsureLoadedAsync();
+
+        if (!SessionState.IsAuthenticated)
+        {
+            Navigation.NavigateTo("account/login");
+            return;
+        }
+
+        if (!SessionState.IsPatient)
+        {
+            _isForbidden = true;
+            _isLoading = false;
+            return;
+        }
+
+        await LoadPrescriptionsAsync();
+    }
+
+    private async Task LoadPrescriptionsAsync()
+    {
+        _isLoading = true;
+        _errorMessage = null;
+
+        try
+        {
+            if (Guid.TryParse(SessionState.PersonId, out var patientId))
+            {
+                var res = await PharmacyApi.GetPrescriptionsByPatientAsync(patientId);
+                _prescriptions = res?.ToList() ?? [];
+            }
+            else
+            {
+                _errorMessage = "Hasta profil kimliği bulunamadı.";
+            }
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"Reçeteler yüklenirken hata oluştu: {ex.Message}";
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+    }
+
+    private async Task OpenDetailModalAsync(Guid prescriptionId)
+    {
+        _errorMessage = null;
+        try
+        {
+            var details = await PharmacyApi.GetPrescriptionByIdAsync(prescriptionId);
+            if (details is not null)
+            {
+                _selectedPrescription = details;
+            }
+            else
+            {
+                _errorMessage = "Reçete detayları yüklenemedi.";
+            }
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"Detay yükleme hatası: {ex.Message}";
+        }
+    }
+
+    private static string GetFriendlyRoute(string route) => route switch
+    {
+        "Oral" => "Ağızdan",
+        "Intravenous" => "Damar yoluyla",
+        "Intramuscular" => "Kas içine",
+        "Subcutaneous" => "Deri altına",
+        "Topical" => "Cilt üzerine",
+        "Inhalation" => "Solunum yoluyla",
+        "Ophthalmic" => "Göze",
+        "Otic" => "Kulağa",
+        "Nasal" => "Buruna",
+        "Rectal" => "Makat yoluyla",
+        _ => route,
+    };
+
+    private static string GetFriendlyFrequency(string frequency) => frequency switch
+    {
+        "1x1" => "günde 1 kez",
+        "2x1" => "günde 2 kez",
+        "3x1" => "günde 3 kez",
+        "4x1" => "günde 4 kez",
+        _ => frequency,
+    };
+
+    private static string GetStatusDisplayText(string status) => status switch
+    {
+        "Draft" => "Taslak",
+        "Signed" => "Geçerli / Eczaneden Alınabilir",
+        "PartiallyDispensed" => "Kısmen Alındı",
+        "Dispensed" => "Tamamı Alındı",
+        "Cancelled" => "İptal Edildi",
+        "Expired" => "Süresi Doldu",
+        "EnteredInError" => "Hatalı Giriş",
+        _ => status,
+    };
+
+    private static string GetStatusBadgeClass(string status) => status switch
+    {
+        "Draft" => "ui-badge--secondary",
+        "Signed" => "ui-badge--primary",
+        "PartiallyDispensed" => "ui-badge--warning",
+        "Dispensed" => "ui-badge--success",
+        "Cancelled" => "ui-badge--danger",
+        "Expired" => "ui-badge--muted",
+        "EnteredInError" => "ui-badge--danger",
+        _ => "ui-badge--secondary",
+    };
+}

@@ -1,0 +1,102 @@
+# Build output
+[Bb]in/
+[Oo]bj/
+[Aa]rtifacts/
+[Ll]og/
+[Ll]ogs/
+publish/
+
+# Test and coverage output
+[Tt]est[Rr]esults/
+coverage/
+coverage.*
+*.coverage
+*.coveragexml
+*.trx
+playwright-report/
+blob-report/
+test-results/
+
+# IDE and editor state
+.vs/
+.vscode/
+.idea/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+*.DotSettings.user
+_ReSharper*/
+*.resharper
+
+# NuGet and local tool caches
+packages/
+*.nupkg
+*.snupkg
+.nuget/
+.dotnet/
+.store/
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+NuGet.Local.Config
+nuget.local.config
+appsettings.Local.json
+appsettings.*.Local.json
+appsettings.*.local.json
+secrets.json
+*.secrets.json
+*.usersecrets
+*.pfx
+*.p12
+*.pem
+*.key
+*.snk
+*.keystore
+*.jks
+
+# Local certificates
+.aspnet/https-aspnetcore-localhost-*.pfx
+
+# Local databases, backups, and container volumes
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+*.mdf
+*.ldf
+*.bak
+*.dump
+*.backup
+.data/
+data/local/
+docker-data/
+minio-data/
+postgres-data/
+
+# Temporary and operating-system files
+*.tmp
+*.temp
+*.swp
+*.swo
+*.orig
+*.pid
+*.userprefs
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Generated front-end dependencies and assets
+node_modules/
+wwwroot/lib/
+
+# Local publish and signing material
+*.apk
+*.aab
+*.appx
+*.appxbundle
+*.msix
+*.msixbundle

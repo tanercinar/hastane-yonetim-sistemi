@@ -1,0 +1,828 @@
+@page "/laboratory/results"
+@using HospitalManagement.Contracts.Diagnostics
+@using HospitalManagement.Web.Client.Diagnostics
+@inject IDiagnosticsApiClient DiagnosticsApi
+
+<div class="container-fluid px-4 py-3" data-testid="lab-results-page">
+    <!-- Header -->
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <div>
+            <h4 class="mb-0 text-dark fw-bold">
+                <i class="bi bi-file-earmark-medical text-primary me-2"></i>Laboratuvar Sonuç Girişi ve Onay
+            </h4>
+            <p class="text-muted small mb-0">Teknik onay, uzman hekim klinik onayı, referans aralığı kontrolü ve düzeltme yönetimi</p>
+        </div>
+        <button class="btn btn-outline-primary btn-sm" @onclick="LoadWorklistAsync">
+            <i class="bi bi-arrow-clockwise me-1"></i>Yenile
+        </button>
+    </div>
+
+    <!-- Demo Banner -->
+    <div class="alert alert-warning py-2 px-3 d-flex align-items-center mb-3 small shadow-sm" role="alert">
+        <i class="bi bi-shield-exclamation me-2 fs-5"></i>
+        <div>
+            <strong>EĞİTİM VE DEMO AMAÇLIDIR:</strong> Bu ekran sentetik biyokimya/hemogram sonuçları üretir. Klinik karar desteği veya otomatik tanı iddiası taşımaz.
+        </div>
+    </div>
+
+    @if (!string.IsNullOrWhiteSpace(_errorMessage))
+    {
+        <div class="alert alert-danger alert-dismissible fade show py-2 small" role="alert">
+            <i class="bi bi-exclamation-circle me-1"></i>@_errorMessage
+            <button type="button" class="btn-close btn-sm" @onclick="() => _errorMessage = null"></button>
+        </div>
+    }
+
+    @if (!string.IsNullOrWhiteSpace(_successMessage))
+    {
+        <div class="alert alert-success alert-dismissible fade show py-2 small" role="alert">
+            <i class="bi bi-check-circle me-1"></i>@_successMessage
+            <button type="button" class="btn-close btn-sm" @onclick="() => _successMessage = null"></button>
+        </div>
+    }
+
+    @if (_pendingResultCandidates.Count > 0)
+    {
+        <div class="card shadow-sm border-primary mb-4" data-testid="pending-lab-result-items">
+            <div class="card-header bg-primary-subtle border-primary py-2">
+                <h6 class="mb-0 fw-bold text-primary">
+                    <i class="bi bi-clipboard2-plus me-1"></i>Sonuç Taslağı Bekleyen İstem Kalemleri
+                    <span class="badge bg-primary ms-1">@_pendingResultCandidates.Count</span>
+                </h6>
+            </div>
+            <div class="table-responsive">
+                <table class="table table-sm align-middle mb-0 small">
+                    <thead class="table-light">
+                        <tr>
+                            <th>İstem</th>
+                            <th>Test / Panel</th>
+                            <th>Numune Barkodu</th>
+                            <th class="text-end">İşlem</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var candidate in _pendingResultCandidates)
+                        {
+                            <tr>
+                                <td class="font-monospace fw-bold">@candidate.OrderNumber</td>
+                                <td><strong>@candidate.CatalogItemName</strong><br /><span class="text-muted">@candidate.CatalogCode</span></td>
+                                <td class="font-monospace">@candidate.SpecimenBarcode</td>
+                                <td class="text-end">
+                                    <button type="button"
+                                            class="btn btn-primary btn-sm"
+                                            disabled="@_isSaving"
+                                            @onclick="() => CreateResultDraftAsync(candidate)">
+                                        <i class="bi bi-file-earmark-plus me-1"></i>Sonuç Taslağı Oluştur
+                                    </button>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    }
+
+    <div class="row g-4">
+        <!-- Left: Worklist -->
+        <div class="col-lg-5">
+            <div class="card shadow-sm border-0 h-100">
+                <div class="card-header bg-white border-bottom py-3 d-flex justify-content-between align-items-center">
+                    <h6 class="mb-0 fw-bold text-dark"><i class="bi bi-list-task me-1"></i>Sonuç İş Listesi</h6>
+                    <div class="d-flex gap-2">
+                        <select class="form-select form-select-sm" style="width: 140px;" @bind="_selectedStatusFilter" @bind:after="LoadWorklistAsync">
+                            <option value="">Tüm Durumlar</option>
+                            <option value="Draft">Taslak</option>
+                            <option value="TechnicallyApproved">Teknik Onaylı</option>
+                            <option value="FinalApproved">Kesinleşmiş (Onaylı)</option>
+                            <option value="Corrected">Düzeltilmiş</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="card-body p-0">
+                    @if (_isLoadingWorklist)
+                    {
+                        <div class="text-center py-5 text-muted">
+                            <div class="spinner-border spinner-border-sm text-primary me-2" role="status"></div>
+                            <span>İş listesi yükleniyor...</span>
+                        </div>
+                    }
+                    else if (_worklist.Count == 0)
+                    {
+                        <div class="text-center py-5 text-muted">
+                            <i class="bi bi-inbox fs-2 d-block mb-2 text-secondary"></i>
+                            <span>Kayıt bulunamadı.</span>
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="list-group list-group-flush">
+                            @foreach (var item in _worklist)
+                            {
+                                var isSelected = _selectedResult?.Id == item.Id;
+                                <button type="button" 
+                                        class="list-group-item list-group-item-action p-3 @(isSelected ? "bg-light border-start border-primary border-3" : "")"
+                                        @onclick="() => SelectResultAsync(item.Id)">
+                                    <div class="d-flex w-100 justify-content-between align-items-start mb-1">
+                                        <h6 class="mb-0 fw-bold text-dark">@item.CatalogItemName</h6>
+                                        <span class="badge @GetStatusBadgeClass(item.Status)">@GetStatusText(item.Status)</span>
+                                    </div>
+                                    <div class="d-flex justify-content-between align-items-center small text-muted">
+                                        <span>Kod: <strong class="text-dark">@item.CatalogCode</strong></span>
+                                        <span>@item.CreatedAtUtc.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</span>
+                                    </div>
+                                    @if (item.HasCriticalFlag)
+                                    {
+                                        <div class="mt-2">
+                                            <span class="badge bg-danger text-white py-1 px-2">
+                                                <i class="bi bi-exclamation-triangle-fill me-1"></i>KRİTİK DEĞER
+                                            </span>
+                                        </div>
+                                    }
+                                    else if (item.HasAbnormalFlag)
+                                    {
+                                        <div class="mt-2">
+                                            <span class="badge bg-warning text-dark py-1 px-2">
+                                                <i class="bi bi-exclamation-diamond me-1"></i>ANORMAL DEĞER
+                                            </span>
+                                        </div>
+                                    }
+                                </button>
+                            }
+                        </div>
+                    }
+                </div>
+            </div>
+        </div>
+
+        <!-- Right: Result Detail & Value Editor -->
+        <div class="col-lg-7">
+            @if (_isLoadingDetail)
+            {
+                <div class="card shadow-sm border-0 text-center py-5">
+                    <div class="spinner-border text-primary mx-auto mb-2" role="status"></div>
+                    <span class="text-muted">Sonuç detayları yükleniyor...</span>
+                </div>
+            }
+            else if (_selectedResult != null)
+            {
+                <div class="card shadow-sm border-0" data-testid="lab-result-detail-card">
+                    <div class="card-header bg-white border-bottom py-3 d-flex justify-content-between align-items-center">
+                        <div>
+                            <span class="badge @GetStatusBadgeClass(_selectedResult.Status) me-2">
+                                @GetStatusText(_selectedResult.Status)
+                            </span>
+                            <strong class="fs-6 text-dark">@_selectedResult.CatalogItemName</strong>
+                            <span class="text-muted small ms-2">(@_selectedResult.CatalogCode)</span>
+                        </div>
+                        <div class="d-flex gap-2">
+                            @if (_selectedResult.Status == "Draft")
+                            {
+                                <button class="btn btn-sm btn-outline-primary" @onclick="SaveDraftValuesAsync" disabled="@_isSaving">
+                                    <i class="bi bi-save me-1"></i>Kaydet
+                                </button>
+                                <button class="btn btn-sm btn-info text-white" @onclick="ApproveTechnicallyAsync" disabled="@_isSaving">
+                                    <i class="bi bi-check-circle me-1"></i>Teknik Onay
+                                </button>
+                            }
+                            
+                            @if (_selectedResult.Status == "TechnicallyApproved")
+                            {
+                                <button class="btn btn-sm btn-success" @onclick="ApproveClinicallyAsync" disabled="@_isSaving">
+                                    <i class="bi bi-patch-check-fill me-1"></i>Klinik Onay (Kesinleştir)
+                                </button>
+                            }
+
+                            @if (_selectedResult.Status == "FinalApproved" || _selectedResult.Status == "Corrected")
+                            {
+                                <button class="btn btn-sm btn-outline-danger" @onclick="() => _showCorrectionModal = true">
+                                    <i class="bi bi-pencil-square me-1"></i>Düzeltme Yap
+                                </button>
+                            }
+                        </div>
+                    </div>
+                    <div class="card-body p-3">
+                        @if (_selectedResult.PreviousResultId.HasValue)
+                        {
+                            <div class="alert alert-info py-2 px-3 small d-flex align-items-center mb-3">
+                                <i class="bi bi-info-circle-fill me-2 fs-5"></i>
+                                <div>
+                                    <strong>DÜZELTİLMİŞ SONUÇ:</strong> Bu sonuç önceki bir kaydın düzeltmesidir.<br/>
+                                    <strong>Düzeltme Gerekçesi:</strong> @_selectedResult.CorrectionReason
+                                </div>
+                            </div>
+                        }
+
+                        <!-- Metadata Grid -->
+                        <div class="row g-2 mb-3 small bg-light p-2 rounded">
+                            <div class="col-sm-6">
+                                <span class="text-muted">İstem ID:</span>
+                                <span class="font-monospace text-dark ms-1">@_selectedResult.DiagnosticOrderId.ToString().Substring(0, 8)...</span>
+                            </div>
+                            <div class="col-sm-6">
+                                <span class="text-muted">Hasta ID:</span>
+                                <span class="font-monospace text-dark ms-1">@_selectedResult.PatientId.ToString().Substring(0, 8)...</span>
+                            </div>
+                            <div class="col-sm-6">
+                                <span class="text-muted">Kayıt Tarihi:</span>
+                                <span class="text-dark ms-1">@_selectedResult.CreatedAtUtc.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</span>
+                            </div>
+                            <div class="col-sm-6">
+                                <span class="text-muted">Kesinleşme:</span>
+                                <span class="text-dark ms-1">@(_selectedResult.ClinicallyApprovedAtUtc?.ToLocalTime().ToString("dd.MM.yyyy HH:mm") ?? "Bekliyor")</span>
+                            </div>
+                        </div>
+
+                        <!-- Parameters Table -->
+                        <h6 class="fw-bold text-dark mb-2">Test Parametreleri</h6>
+                        <div class="table-responsive mb-3">
+                            <table class="table table-sm table-hover align-middle mb-0">
+                                <thead class="table-light small">
+                                    <tr>
+                                        <th>Parametre</th>
+                                        <th style="width: 140px;">Sonuç Değeri</th>
+                                        <th>Birim</th>
+                                        <th>Referans Aralığı</th>
+                                        <th style="width: 100px;">Bayrak</th>
+                                        <th>Not</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @for (int i = 0; i < _editedItems.Count; i++)
+                                    {
+                                        var idx = i;
+                                        var item = _editedItems[idx];
+                                        var isEditable = _selectedResult.Status == "Draft";
+
+                                        <tr>
+                                            <td>
+                                                <strong class="text-dark">@item.ParameterName</strong>
+                                                <small class="d-block text-muted">@item.ParameterCode</small>
+                                            </td>
+                                            <td>
+                                                @if (isEditable)
+                                                {
+                                                    <input type="number" step="any" class="form-control form-control-sm"
+                                                           @bind="item.NumericValue"
+                                                           @bind:after="() => RecomputeItemFlag(item)" />
+                                                }
+                                                else
+                                                {
+                                                    <strong class="text-dark">@(item.NumericValue?.ToString() ?? item.StringValue ?? "-")</strong>
+                                                }
+                                            </td>
+                                            <td class="text-muted small">@(item.Unit ?? "-")</td>
+                                            <td class="small">
+                                                @if (item.ReferenceRangeLow.HasValue && item.ReferenceRangeHigh.HasValue)
+                                                {
+                                                    <span class="text-dark">@item.ReferenceRangeLow - @item.ReferenceRangeHigh</span>
+                                                }
+                                                else if (!string.IsNullOrWhiteSpace(item.ReferenceRangeText))
+                                                {
+                                                    <span class="text-dark">@item.ReferenceRangeText</span>
+                                                }
+                                                else
+                                                {
+                                                    <span class="text-muted">-</span>
+                                                }
+                                            </td>
+                                            <td>
+                                                <span class="badge @GetFlagBadgeClass(item.Flag)">
+                                                    @GetFlagText(item.Flag)
+                                                </span>
+                                            </td>
+                                            <td>
+                                                @if (isEditable)
+                                                {
+                                                    <input type="text" class="form-control form-control-sm" placeholder="Not"
+                                                           @bind="item.Notes" />
+                                                }
+                                                else
+                                                {
+                                                    <span class="small text-muted">@(item.Notes ?? "-")</span>
+                                                }
+                                            </td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+
+                        <!-- Clinical Notes -->
+                        <div class="mb-3">
+                            <label class="form-label small fw-bold text-muted">Laboratuvar / Klinik Notu</label>
+                            @if (_selectedResult.Status == "Draft")
+                            {
+                                <textarea class="form-control form-control-sm" rows="2"
+                                          @bind="_clinicalNotes" placeholder="Laboratuvar uzman notu ekleyin..."></textarea>
+                            }
+                            else
+                            {
+                                <p class="small text-dark bg-light p-2 rounded mb-0">@(_selectedResult.ClinicalNotes ?? "Ek klinik not girilmemiştir.")</p>
+                            }
+                        </div>
+                    </div>
+                </div>
+            }
+            else
+            {
+                <div class="card shadow-sm border-0 text-center py-5">
+                    <i class="bi bi-arrow-left-circle fs-1 text-muted mb-2"></i>
+                    <h6 class="text-dark fw-bold">Sonuç Seçilmedi</h6>
+                    <p class="text-muted small mb-0">İşlem yapmak veya detaylarını görmek için soldaki iş listesinden bir sonuç seçin.</p>
+                </div>
+            }
+        </div>
+    </div>
+</div>
+
+<!-- Correction Modal -->
+@if (_showCorrectionModal && _selectedResult != null)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);" role="dialog">
+        <div class="modal-dialog modal-lg modal-dialog-centered">
+            <div class="modal-content shadow border-0">
+                <div class="modal-header bg-danger text-white">
+                    <h6 class="modal-title fw-bold"><i class="bi bi-pencil-square me-2"></i>Sonuç Düzeltme (Klinik İptal/Düzeltme)</h6>
+                    <button type="button" class="btn-close btn-close-white" @onclick="() => _showCorrectionModal = false"></button>
+                </div>
+                <div class="modal-body p-4">
+                    <div class="alert alert-warning py-2 px-3 small mb-3">
+                        <i class="bi bi-exclamation-triangle-fill me-1"></i>
+                        <strong>Önemli Kural:</strong> Kesinleşmiş klinik sonuçlar sessizce değiştirilemez. Yapılan her düzeltme yeni bir sürüm oluşturur ve eski sonuca bağlanarak denetim günlüğüne kaydedilir.
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label small fw-bold text-dark">Zorunlu Düzeltme Gerekçesi <span class="text-danger">*</span></label>
+                        <textarea class="form-control" rows="2" @bind="_correctionReason"
+                                  placeholder="Örn: Analizör re-kalibrasyonu sonrası tekrarlanan çalışma sonucu güncellendi."></textarea>
+                    </div>
+
+                    <h6 class="fw-bold text-dark mb-2">Düzeltilmiş Parametre Değerleri</h6>
+                    <table class="table table-sm table-bordered align-middle">
+                        <thead class="table-light small">
+                            <tr>
+                                <th>Parametre</th>
+                                <th style="width: 140px;">Yeni Değer</th>
+                                <th>Birim</th>
+                                <th>Referans</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var itm in _correctionItems)
+                            {
+                                <tr>
+                                    <td>
+                                        <strong>@itm.ParameterName</strong>
+                                        <small class="d-block text-muted">@itm.ParameterCode</small>
+                                    </td>
+                                    <td>
+                                        <input type="number" step="any" class="form-control form-control-sm"
+                                               @bind="itm.NumericValue" />
+                                    </td>
+                                    <td class="small text-muted">@(itm.Unit ?? "-")</td>
+                                    <td class="small text-muted">@(itm.ReferenceRangeLow.HasValue ? $"{itm.ReferenceRangeLow} - {itm.ReferenceRangeHigh}" : "-")</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+                <div class="modal-footer bg-light">
+                    <button type="button" class="btn btn-sm btn-secondary" @onclick="() => _showCorrectionModal = false">Vazgeç</button>
+                    <button type="button" class="btn btn-sm btn-danger" @onclick="SubmitCorrectionAsync" disabled="@(_isSaving || string.IsNullOrWhiteSpace(_correctionReason))">
+                        <i class="bi bi-check2-circle me-1"></i>Düzeltmeyi Onayla ve Kaydet
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private List<LabResultSummaryResponse> _worklist = [];
+    private List<PendingResultCandidate> _pendingResultCandidates = [];
+    private LabResultDetailResponse? _selectedResult;
+    private List<EditableItemModel> _editedItems = [];
+    private List<EditableItemModel> _correctionItems = [];
+
+    private string? _selectedStatusFilter;
+    private string? _clinicalNotes;
+    private string? _correctionReason;
+
+    private bool _isLoadingWorklist;
+    private bool _isLoadingDetail;
+    private bool _isSaving;
+    private bool _showCorrectionModal;
+
+    private string? _errorMessage;
+    private string? _successMessage;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadWorklistAsync();
+    }
+
+    private async Task LoadWorklistAsync()
+    {
+        _isLoadingWorklist = true;
+        _errorMessage = null;
+
+        try
+        {
+            _worklist = await DiagnosticsApi.GetLabResultWorklistAsync(_selectedStatusFilter);
+            await LoadPendingResultCandidatesAsync();
+        }
+        catch (Exception)
+        {
+            _errorMessage = "Laboratuvar sonuç iş listesi yüklenemedi. Lütfen yeniden deneyin.";
+        }
+        finally
+        {
+            _isLoadingWorklist = false;
+        }
+    }
+
+    private async Task LoadPendingResultCandidatesAsync()
+    {
+        var candidates = new List<PendingResultCandidate>();
+        var orders = await DiagnosticsApi.GetDiagnosticOrderWorklistAsync(
+            orderType: "Laboratory",
+            status: "InProgress",
+            maxResults: 50);
+
+        foreach (var orderSummary in orders)
+        {
+            var order = await DiagnosticsApi.GetDiagnosticOrderByIdAsync(orderSummary.Id);
+            if (order is null)
+            {
+                continue;
+            }
+
+            var specimens = await DiagnosticsApi.GetSpecimensByOrderIdAsync(order.Id);
+            var specimen = specimens
+                .Where(item => item.Status is "Received" or "Processing" or "Completed")
+                .OrderByDescending(item => item.ReceivedAtUtc ?? item.CreatedAtUtc)
+                .FirstOrDefault();
+            if (specimen is null)
+            {
+                continue;
+            }
+
+            var existingResults = await DiagnosticsApi.GetLabResultsByOrderIdAsync(order.Id);
+            var existingItemIds = existingResults
+                .Where(result => result.Status != "EnteredInError")
+                .Select(result => result.DiagnosticOrderItemId)
+                .ToHashSet();
+
+            candidates.AddRange(order.Items
+                .Where(item => !existingItemIds.Contains(item.Id))
+                .Select(item => new PendingResultCandidate(
+                    order.Id,
+                    item.Id,
+                    specimen.Id,
+                    order.PatientId,
+                    order.OrderNumber,
+                    item.CatalogCode,
+                    item.CatalogItemName,
+                    specimen.Barcode)));
+        }
+
+        _pendingResultCandidates = candidates;
+    }
+
+    private async Task CreateResultDraftAsync(PendingResultCandidate candidate)
+    {
+        _isSaving = true;
+        _errorMessage = null;
+        _successMessage = null;
+        try
+        {
+            var result = await DiagnosticsApi.CreateDraftLabResultAsync(new CreateDraftLabResultRequest
+            {
+                DiagnosticOrderId = candidate.OrderId,
+                DiagnosticOrderItemId = candidate.OrderItemId,
+                SpecimenId = candidate.SpecimenId,
+                PatientId = candidate.PatientId,
+                CatalogCode = candidate.CatalogCode,
+                CatalogItemName = candidate.CatalogItemName,
+                ClinicalNotes = "DEMO sonuç taslağı; değerler yetkili laboratuvar personeli tarafından girilecektir.",
+            });
+
+            if (result is null)
+            {
+                _errorMessage = "Sonuç taslağı oluşturulamadı. Numune durumu ve yetkinizi kontrol edin.";
+                return;
+            }
+
+            _successMessage = $"{candidate.CatalogItemName} için sonuç taslağı oluşturuldu.";
+            await LoadWorklistAsync();
+            await SelectResultAsync(result.Id);
+        }
+        catch (Exception)
+        {
+            _errorMessage = "Sonuç taslağı oluşturulamadı. Lütfen yeniden deneyin.";
+        }
+        finally
+        {
+            _isSaving = false;
+        }
+    }
+
+    private async Task SelectResultAsync(Guid id)
+    {
+        _isLoadingDetail = true;
+        _errorMessage = null;
+        _successMessage = null;
+
+        try
+        {
+            _selectedResult = await DiagnosticsApi.GetLabResultByIdAsync(id);
+            if (_selectedResult != null)
+            {
+                _clinicalNotes = _selectedResult.ClinicalNotes;
+                _editedItems = _selectedResult.Items.Select(i => new EditableItemModel
+                {
+                    Id = i.Id,
+                    ParameterCode = i.ParameterCode,
+                    ParameterName = i.ParameterName,
+                    NumericValue = i.NumericValue,
+                    StringValue = i.StringValue,
+                    Unit = i.Unit,
+                    ReferenceRangeLow = i.ReferenceRangeLow,
+                    ReferenceRangeHigh = i.ReferenceRangeHigh,
+                    ReferenceRangeText = i.ReferenceRangeText,
+                    Flag = i.Flag,
+                    Notes = i.Notes,
+                }).ToList();
+
+                _correctionItems = _selectedResult.Items.Select(i => new EditableItemModel
+                {
+                    Id = i.Id,
+                    ParameterCode = i.ParameterCode,
+                    ParameterName = i.ParameterName,
+                    NumericValue = i.NumericValue,
+                    StringValue = i.StringValue,
+                    Unit = i.Unit,
+                    ReferenceRangeLow = i.ReferenceRangeLow,
+                    ReferenceRangeHigh = i.ReferenceRangeHigh,
+                    ReferenceRangeText = i.ReferenceRangeText,
+                    Flag = i.Flag,
+                    Notes = i.Notes,
+                }).ToList();
+            }
+        }
+        catch (Exception)
+        {
+            _errorMessage = "Laboratuvar sonuç ayrıntısı yüklenemedi. Lütfen yeniden deneyin.";
+        }
+        finally
+        {
+            _isLoadingDetail = false;
+        }
+    }
+
+    private void RecomputeItemFlag(EditableItemModel item)
+    {
+        if (item.NumericValue.HasValue && item.ReferenceRangeLow.HasValue && item.ReferenceRangeHigh.HasValue)
+        {
+            var val = item.NumericValue.Value;
+            var low = item.ReferenceRangeLow.Value;
+            var high = item.ReferenceRangeHigh.Value;
+
+            if (low > 0 && val <= (low * 0.5m))
+            {
+                item.Flag = "CriticalLow";
+            }
+            else if (val >= (high * 2.0m))
+            {
+                item.Flag = "CriticalHigh";
+            }
+            else if (val < low)
+            {
+                item.Flag = "Low";
+            }
+            else if (val > high)
+            {
+                item.Flag = "High";
+            }
+            else
+            {
+                item.Flag = "Normal";
+            }
+        }
+    }
+
+    private async Task SaveDraftValuesAsync()
+    {
+        if (_selectedResult == null) return;
+        _isSaving = true;
+        _errorMessage = null;
+
+        try
+        {
+            var req = new UpdateLabResultItemsRequest
+            {
+                ClinicalNotes = _clinicalNotes,
+                Items = _editedItems.Select(i => new LabResultItemValueRequest
+                {
+                    ParameterCode = i.ParameterCode,
+                    NumericValue = i.NumericValue,
+                    StringValue = i.StringValue,
+                    Notes = i.Notes,
+                }).ToList(),
+            };
+
+            var updated = await DiagnosticsApi.UpdateLabResultItemsAsync(_selectedResult.Id, req);
+            if (updated != null)
+            {
+                _selectedResult = updated;
+                _successMessage = "Sonuç parametreleri başarıyla kaydedildi.";
+                await LoadWorklistAsync();
+            }
+            else
+            {
+                _errorMessage = "Sonuç güncellenemedi.";
+            }
+        }
+        catch (Exception)
+        {
+            _errorMessage = "Taslak sonuç kaydedilemedi. Bilgileri kontrol edip yeniden deneyin.";
+        }
+        finally
+        {
+            _isSaving = false;
+        }
+    }
+
+    private async Task ApproveTechnicallyAsync()
+    {
+        if (_selectedResult == null) return;
+        _isSaving = true;
+        _errorMessage = null;
+
+        try
+        {
+            var updated = await DiagnosticsApi.ApproveLabResultTechnicallyAsync(_selectedResult.Id);
+            if (updated != null)
+            {
+                _selectedResult = updated;
+                _successMessage = "Teknik onay başarıyla verildi.";
+                await LoadWorklistAsync();
+            }
+            else
+            {
+                _errorMessage = "Teknik onay verilemedi.";
+            }
+        }
+        catch (Exception)
+        {
+            _errorMessage = "Teknik onay tamamlanamadı. Lütfen yeniden deneyin.";
+        }
+        finally
+        {
+            _isSaving = false;
+        }
+    }
+
+    private async Task ApproveClinicallyAsync()
+    {
+        if (_selectedResult == null) return;
+        _isSaving = true;
+        _errorMessage = null;
+
+        try
+        {
+            var updated = await DiagnosticsApi.ApproveLabResultClinicallyAsync(_selectedResult.Id);
+            if (updated != null)
+            {
+                _selectedResult = updated;
+                _successMessage = "Klinik uzman onayı başarıyla verildi. Sonuç kesinleşti.";
+                await LoadWorklistAsync();
+            }
+            else
+            {
+                _errorMessage = "Klinik onay verilemedi.";
+            }
+        }
+        catch (Exception)
+        {
+            _errorMessage = "Klinik onay tamamlanamadı. Lütfen yeniden deneyin.";
+        }
+        finally
+        {
+            _isSaving = false;
+        }
+    }
+
+    private async Task SubmitCorrectionAsync()
+    {
+        if (_selectedResult == null || string.IsNullOrWhiteSpace(_correctionReason)) return;
+        _isSaving = true;
+        _errorMessage = null;
+
+        try
+        {
+            var req = new CorrectLabResultRequest
+            {
+                CorrectionReason = _correctionReason.Trim(),
+                CorrectedItems = _correctionItems.Select(i => new LabResultItemValueRequest
+                {
+                    ParameterCode = i.ParameterCode,
+                    NumericValue = i.NumericValue,
+                    StringValue = i.StringValue,
+                    Notes = i.Notes,
+                }).ToList(),
+            };
+
+            var corrected = await DiagnosticsApi.CorrectLabResultAsync(_selectedResult.Id, req);
+            if (corrected != null)
+            {
+                _showCorrectionModal = false;
+                _selectedResult = corrected;
+                _successMessage = "Düzeltme başarıyla kaydedildi ve yeni sonuç oluşturuldu.";
+                await LoadWorklistAsync();
+            }
+            else
+            {
+                _errorMessage = "Düzeltme işlemi gerçekleştirilemedi.";
+            }
+        }
+        catch (Exception)
+        {
+            _errorMessage = "Sonuç düzeltmesi kaydedilemedi. Bilgileri kontrol edip yeniden deneyin.";
+        }
+        finally
+        {
+            _isSaving = false;
+        }
+    }
+
+    private static string GetStatusBadgeClass(string status) => status switch
+    {
+        "Draft" => "bg-secondary text-white",
+        "TechnicallyApproved" => "bg-info text-white",
+        "FinalApproved" => "bg-success text-white",
+        "Corrected" => "bg-primary text-white",
+        "Cancelled" => "bg-dark text-white",
+        "EnteredInError" => "bg-danger text-white",
+        _ => "bg-light text-dark",
+    };
+
+    private static string GetStatusText(string status) => status switch
+    {
+        "Draft" => "Taslak",
+        "TechnicallyApproved" => "Teknik Onaylı",
+        "FinalApproved" => "Kesinleşmiş (Onaylı)",
+        "Corrected" => "Düzeltilmiş",
+        "Cancelled" => "İptal Edildi",
+        "EnteredInError" => "Hatalı Giriş",
+        _ => status,
+    };
+
+    private static string GetFlagBadgeClass(string flag) => flag switch
+    {
+        "Normal" => "bg-success-subtle text-success border border-success",
+        "Low" => "bg-warning-subtle text-warning-emphasis border border-warning",
+        "High" => "bg-warning-subtle text-warning-emphasis border border-warning",
+        "CriticalLow" => "bg-danger text-white",
+        "CriticalHigh" => "bg-danger text-white",
+        "Abnormal" => "bg-danger-subtle text-danger border border-danger",
+        _ => "bg-light text-secondary",
+    };
+
+    private static string GetFlagText(string flag) => flag switch
+    {
+        "Normal" => "Normal",
+        "Low" => "Düşük (L)",
+        "High" => "Yüksek (H)",
+        "CriticalLow" => "KRİTİK DÜŞÜK",
+        "CriticalHigh" => "KRİTİK YÜKSEK",
+        "Abnormal" => "Anormal",
+        _ => flag,
+    };
+
+    private sealed record PendingResultCandidate(
+        Guid OrderId,
+        Guid OrderItemId,
+        Guid SpecimenId,
+        Guid PatientId,
+        string OrderNumber,
+        string CatalogCode,
+        string CatalogItemName,
+        string SpecimenBarcode);
+
+    private sealed class EditableItemModel
+    {
+        public Guid Id { get; set; }
+        public string ParameterCode { get; set; } = string.Empty;
+        public string ParameterName { get; set; } = string.Empty;
+        public decimal? NumericValue { get; set; }
+        public string? StringValue { get; set; }
+        public string? Unit { get; set; }
+        public decimal? ReferenceRangeLow { get; set; }
+        public decimal? ReferenceRangeHigh { get; set; }
+        public string? ReferenceRangeText { get; set; }
+        public string Flag { get; set; } = "Normal";
+        public string? Notes { get; set; }
+    }
+}

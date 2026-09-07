@@ -1,0 +1,55 @@
+@using HospitalManagement.UI.Services
+@inject IPlatformConnectivityService ConnectivityService
+
+<div class="connection-required-container p-4 text-center border rounded shadow-sm bg-light" role="alert" aria-live="assertive">
+    <div class="mb-3">
+        <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" fill="currentColor" class="bi bi-wifi-off text-warning" viewBox="0 0 16 16" aria-hidden="true">
+            <path d="M10.706 3.294A12.6 12.6 0 0 0 8 3C5.259 3 2.723 3.882.663 5.379a.485.485 0 0 0-.048.736.518.518 0 0 0 .668.05A11.45 11.45 0 0 1 8 4c.63 0 1.249.05 1.852.148l.854-.854zM8 6c-1.905 0-3.68.56-5.166 1.526a.48.48 0 0 0-.063.745.525.525 0 0 0 .652.065 8.45 8.45 0 0 1 4.577-1.336c.458 0 .903.04 1.332.115l.89-.89A9.9 9.9 0 0 0 8 6z"/>
+            <path d="M13.854 3.646a.5.5 0 0 1 0 .708l-10 10a.5.5 0 0 1-.708-.708l10-10a.5.5 0 0 1 .708 0zM6.55 10.655a.5.5 0 0 1 .7-.049 4.5 4.5 0 0 1 .75.644.5.5 0 1 1-.75.66 3.5 3.5 0 0 0-.583-.5.5.5 0 0 1-.117-.755z"/>
+        </svg>
+    </div>
+    <h3 class="h5 fw-bold text-danger">Bağlantı Gerekli</h3>
+    <p class="text-muted mb-3">
+        @(Message ?? "Klinik veri güvenliği ve hasta güvenliği gereği sistem çevrimdışı çalışmayı desteklemez. Lütfen internet veya hastane yerel ağ bağlantınızı kontrol ediniz.")
+    </p>
+    <div class="d-flex justify-content-center gap-2">
+        <button type="button" class="btn btn-primary btn-sm" @onclick="HandleRetryClickAsync" disabled="@_isChecking">
+            @if (_isChecking)
+            {
+                <span class="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>
+                <span>Kontrol Ediliyor...</span>
+            }
+            else
+            {
+                <span>Yeniden Dene</span>
+            }
+        </button>
+    </div>
+</div>
+
+@code {
+    [Parameter]
+    public string? Message { get; set; }
+
+    [Parameter]
+    public EventCallback OnConnectionRestored { get; set; }
+
+    private bool _isChecking;
+
+    private async Task HandleRetryClickAsync()
+    {
+        _isChecking = true;
+        try
+        {
+            var isOnline = await ConnectivityService.CheckConnectivityAsync();
+            if (isOnline && OnConnectionRestored.HasDelegate)
+            {
+                await OnConnectionRestored.InvokeAsync();
+            }
+        }
+        finally
+        {
+            _isChecking = false;
+        }
+    }
+}

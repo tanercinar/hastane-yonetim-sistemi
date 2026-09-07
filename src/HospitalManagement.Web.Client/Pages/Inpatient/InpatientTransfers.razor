@@ -1,0 +1,580 @@
+@page "/inpatient/transfers"
+@using HospitalManagement.Contracts.Inpatient
+@using HospitalManagement.Web.Client.Inpatient
+@inject IInpatientApiClient InpatientApi
+
+<div class="container-fluid py-3">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <div>
+            <h2 class="fw-bold mb-0">Hasta Transfer & Yatak Hareketleri</h2>
+            <p class="text-muted mb-0">Servisler ve odalar arası hasta nakil talepleri, onayları ve yatak transferleri.</p>
+        </div>
+        <div class="d-flex gap-2">
+            <button class="btn btn-primary" @onclick="OpenNewTransferModal">
+                <i class="bi bi-arrow-left-right me-1"></i> Yeni Transfer Talebi
+            </button>
+            <button class="btn btn-outline-primary" @onclick="RefreshDataAsync">
+                <i class="bi bi-arrow-clockwise me-1"></i> Yenile
+            </button>
+        </div>
+    </div>
+
+    @if (!string.IsNullOrWhiteSpace(_successMessage))
+    {
+        <div class="alert alert-success alert-dismissible fade show" role="alert">
+            <i class="bi bi-check-circle-fill me-2"></i>@_successMessage
+            <button type="button" class="btn-close" @onclick="() => _successMessage = null"></button>
+        </div>
+    }
+
+    @if (!string.IsNullOrWhiteSpace(_errorMessage))
+    {
+        <div class="alert alert-danger alert-dismissible fade show" role="alert">
+            <i class="bi bi-exclamation-triangle-fill me-2"></i>@_errorMessage
+            <button type="button" class="btn-close" @onclick="() => _errorMessage = null"></button>
+        </div>
+    }
+
+    <!-- Filtreler -->
+    <div class="card shadow-sm border-0 mb-4">
+        <div class="card-body">
+            <div class="row g-3 align-items-center">
+                <div class="col-md-4">
+                    <label class="form-label small fw-semibold">Transfer Durumu</label>
+                    <select class="form-select" @bind="_selectedStatus" @bind:after="RefreshDataAsync">
+                        <option value="">Tüm Durumlar</option>
+                        <option value="Requested">Talep Edildi (Onay Bekliyor)</option>
+                        <option value="Accepted">Kabul Edildi (Yatak Bekliyor)</option>
+                        <option value="Completed">Tamamlandı (Nakil Bitti)</option>
+                        <option value="Cancelled">İptal Edildi</option>
+                    </select>
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label small fw-semibold">Hedef Servis</label>
+                    <select class="form-select" @bind="_selectedTargetWardId" @bind:after="RefreshDataAsync">
+                        <option value="">Tüm Servisler</option>
+                        @foreach (var w in _wards)
+                        {
+                            <option value="@w.Id">@w.Name</option>
+                        }
+                    </select>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    @if (_isLoading)
+    {
+        <div class="text-center py-5">
+            <div class="spinner-border text-primary" role="status">
+                <span class="visually-hidden">Yükleniyor...</span>
+            </div>
+            <p class="text-muted mt-2">Transfer kayıtları alınıyor...</p>
+        </div>
+    }
+    else if (_transfers.Count == 0)
+    {
+        <div class="alert alert-info">Kriterlere uygun transfer hareketi bulunamadı.</div>
+    }
+    else
+    {
+        <div class="card shadow-sm border-0">
+            <div class="table-responsive">
+                <table class="table table-hover align-middle mb-0">
+                    <thead class="table-light">
+                        <tr>
+                            <th>Hasta / Yatış</th>
+                            <th>Kaynak (Mevcut)</th>
+                            <th>Hedef (Transfer)</th>
+                            <th>Gerekçe</th>
+                            <th>Durum</th>
+                            <th>Talep Tarihi</th>
+                            <th class="text-end">İşlemler</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var t in _transfers)
+                        {
+                            <tr>
+                                <td>
+                                    <div class="fw-bold font-monospace small">@t.PatientId.ToString().Substring(0, 8)...</div>
+                                    <small class="text-muted">Yatış: @t.AdmissionId.ToString().Substring(0, 8)...</small>
+                                </td>
+                                <td>
+                                    <div><strong>@t.SourceWardName</strong></div>
+                                    <span class="badge bg-secondary">Yatak: @t.SourceBedNumber</span>
+                                </td>
+                                <td>
+                                    <div><strong>@t.TargetWardName</strong></div>
+                                    @if (!string.IsNullOrWhiteSpace(t.TargetBedNumber))
+                                    {
+                                        <span class="badge bg-primary">Yatak: @t.TargetBedNumber</span>
+                                    }
+                                    else
+                                    {
+                                        <span class="badge bg-warning text-dark">Yatak Belirlenmedi</span>
+                                    }
+                                </td>
+                                <td>
+                                    <span>@t.TransferReason</span>
+                                </td>
+                                <td>
+                                    @RenderStatusBadge(t.Status)
+                                </td>
+                                <td>
+                                    @t.RequestedAtUtc.ToLocalTime().ToString("dd.MM.yyyy HH:mm")
+                                </td>
+                                <td class="text-end">
+                                    <div class="btn-group btn-group-sm">
+                                        @if (t.Status == "Requested")
+                                        {
+                                            <button class="btn btn-outline-success" @onclick="() => OpenAcceptModal(t)">
+                                                <i class="bi bi-check2 me-1"></i> Kabul Et
+                                            </button>
+                                            <button class="btn btn-outline-danger" @onclick="() => OpenCancelModal(t)">
+                                                <i class="bi bi-x-circle me-1"></i> İptal
+                                            </button>
+                                        }
+                                        else if (t.Status == "Accepted")
+                                        {
+                                            <button class="btn btn-outline-primary" @onclick="() => OpenCompleteModal(t)">
+                                                <i class="bi bi-arrow-right-circle me-1"></i> Transferi Tamamla
+                                            </button>
+                                            <button class="btn btn-outline-danger" @onclick="() => OpenCancelModal(t)">
+                                                <i class="bi bi-x-circle me-1"></i> İptal
+                                            </button>
+                                        }
+                                    </div>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    }
+</div>
+
+<!-- Modal: Yeni Transfer Talebi -->
+@if (_showNewTransferModal)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal-dialog modal-lg modal-dialog-centered">
+            <div class="modal-content border-0 shadow">
+                <div class="modal-header bg-primary text-white">
+                    <h5 class="modal-title"><i class="bi bi-arrow-left-right me-2"></i>Yeni Hasta Transfer Talebi</h5>
+                    <button type="button" class="btn-close btn-close-white" @onclick="() => _showNewTransferModal = false"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="row g-3">
+                        <div class="col-12">
+                            <label class="form-label fw-semibold">Aktif Yatış Seçimi:</label>
+                            <select class="form-select" @bind="_newAdmissionId">
+                                <option value="">-- Yatıştaki Hastayı Seçiniz --</option>
+                                @foreach (var adm in _activeAdmissions)
+                                {
+                                    <option value="@adm.Id">@adm.AdmissionNumber - Hasta: @adm.PatientId.ToString().Substring(0, 8) (@adm.WardName / Yatak: @adm.BedNumber)</option>
+                                }
+                            </select>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label fw-semibold">Hedef Servis:</label>
+                            <select class="form-select" @bind="_newTargetWardId" @bind:after="OnNewTargetWardSelectedAsync">
+                                <option value="">-- Hedef Servis Seçiniz --</option>
+                                @foreach (var w in _wards)
+                                {
+                                    <option value="@w.Id">@w.Name (@w.Building - @w.Floor)</option>
+                                }
+                            </select>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label fw-semibold">Hedef Yatak (Opsiyonel):</label>
+                            <select class="form-select" @bind="_newTargetBedId">
+                                <option value="">-- Servis Kabulünde Belirlensin --</option>
+                                @foreach (var b in _availableBedsForTargetWard)
+                                {
+                                    <option value="@b.Id">Yatak @b.BedNumber</option>
+                                }
+                            </select>
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label fw-semibold">Transfer Gerekçesi:</label>
+                            <select class="form-select mb-2" @bind="_newTransferReason">
+                                <option value="Klinik durum değişikliği / Yoğun bakım ihtiyacı">Klinik durum değişikliği / Yoğun bakım ihtiyacı</option>
+                                <option value="Yoğun bakımdan servise devir (Step-down)">Yoğun bakımdan servise devir (Step-down)</option>
+                                <option value="İzolasyon gereksinimi">İzolasyon gereksinimi</option>
+                                <option value="Bölüm/Branş değişikliği">Bölüm/Branş değişikliği</option>
+                                <option value="Hasta/Refakatçi oda değişikliği talebi">Hasta/Refakatçi oda değişikliği talebi</option>
+                                <option value="Oda/Yatak teknik bakım ihtiyacı">Oda/Yatak teknik bakım ihtiyacı</option>
+                            </select>
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label fw-semibold">Klinik Notlar:</label>
+                            <textarea class="form-control" rows="2" @bind="_newClinicalNotes" placeholder="Hasta hemodinamik olarak stabil..."></textarea>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" @onclick="() => _showNewTransferModal = false">Vazgeç</button>
+                    <button type="button" class="btn btn-primary" @onclick="SubmitNewTransferAsync">
+                        <i class="bi bi-send me-1"></i> Transfer Talebini Başlat
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+<!-- Modal: Transfer Kabul Et -->
+@if (_showAcceptModal && _selectedTransferForAction != null)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content border-0 shadow">
+                <div class="modal-header bg-success text-white">
+                    <h5 class="modal-title"><i class="bi bi-check2-circle me-2"></i>Transfer Talebini Kabul Et</h5>
+                    <button type="button" class="btn-close btn-close-white" @onclick="() => _showAcceptModal = false"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="alert alert-light border mb-3">
+                        <div><strong>Kaynak:</strong> @_selectedTransferForAction.SourceWardName / Yatak @_selectedTransferForAction.SourceBedNumber</div>
+                        <div><strong>Hedef Servis:</strong> @_selectedTransferForAction.TargetWardName</div>
+                        <div><strong>Gerekçe:</strong> @_selectedTransferForAction.TransferReason</div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">Rezerve Edilecek Yatak (Opsiyonel):</label>
+                        <select class="form-select" @bind="_acceptTargetBedId">
+                            <option value="">-- Nakil Sırasında Belirlensin --</option>
+                            @foreach (var b in _availableBedsForAction)
+                            {
+                                <option value="@b.Id">Yatak @b.BedNumber</option>
+                            }
+                        </select>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" @onclick="() => _showAcceptModal = false">Vazgeç</button>
+                    <button type="button" class="btn btn-success" @onclick="SubmitAcceptTransferAsync">
+                        <i class="bi bi-check-lg me-1"></i> Kabul Onayı Ver
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+<!-- Modal: Transferi Tamamla -->
+@if (_showCompleteModal && _selectedTransferForAction != null)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content border-0 shadow">
+                <div class="modal-header bg-primary text-white">
+                    <h5 class="modal-title"><i class="bi bi-arrow-right-circle me-2"></i>Transferi Tamamla ve Yatağa Al</h5>
+                    <button type="button" class="btn-close btn-close-white" @onclick="() => _showCompleteModal = false"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="alert alert-info border mb-3">
+                        <i class="bi bi-info-circle me-1"></i>
+                        Eski yatak (<strong>@_selectedTransferForAction.SourceBedNumber</strong>) otomatik olarak <strong>Temizlik (Cleaning)</strong> durumuna alınacak, hasta yeni seçilen yatağa yerleştirilecektir.
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">Yerleştirilecek Hedef Yatak:</label>
+                        <select class="form-select" @bind="_completeTargetBedId">
+                            <option value="">-- Hedef Yatak Seçiniz --</option>
+                            @foreach (var b in _availableBedsForAction)
+                            {
+                                <option value="@b.Id">Yatak @b.BedNumber</option>
+                            }
+                        </select>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" @onclick="() => _showCompleteModal = false">Vazgeç</button>
+                    <button type="button" class="btn btn-primary" @onclick="SubmitCompleteTransferAsync">
+                        <i class="bi bi-check2-all me-1"></i> Nakli Tamamla
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+<!-- Modal: Transfer İptali -->
+@if (_showCancelModal && _selectedTransferForAction != null)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content border-0 shadow">
+                <div class="modal-header bg-danger text-white">
+                    <h5 class="modal-title"><i class="bi bi-x-circle me-2"></i>Transfer İptali</h5>
+                    <button type="button" class="btn-close btn-close-white" @onclick="() => _showCancelModal = false"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="alert alert-light border mb-3">
+                        <div><strong>Transfer ID:</strong> @_selectedTransferForAction.Id</div>
+                        <div><strong>Gerekçe:</strong> @_selectedTransferForAction.TransferReason</div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">İptal Gerekçesi:</label>
+                        <textarea class="form-control" rows="3" @bind="_cancelReason" placeholder="Klinik durum stabil seyrettiğinden nakilden vazgeçildi..."></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" @onclick="() => _showCancelModal = false">Vazgeç</button>
+                    <button type="button" class="btn btn-danger" @onclick="SubmitCancelTransferAsync">
+                        <i class="bi bi-x-circle me-1"></i> İptali Onayla
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private bool _isLoading = true;
+    private string? _successMessage;
+    private string? _errorMessage;
+
+    private List<WardResponse> _wards = [];
+    private List<TransferSummaryResponse> _transfers = [];
+    private List<AdmissionSummaryResponse> _activeAdmissions = [];
+
+    private string _selectedStatus = "";
+    private string _selectedTargetWardId = "";
+
+    // Modal: Yeni Transfer
+    private bool _showNewTransferModal;
+    private string _newAdmissionId = "";
+    private string _newTargetWardId = "";
+    private string _newTargetBedId = "";
+    private string _newTransferReason = "Klinik durum değişikliği / Yoğun bakım ihtiyacı";
+    private string _newClinicalNotes = "";
+    private List<BedResponse> _availableBedsForTargetWard = [];
+
+    // Modal: Kabul
+    private bool _showAcceptModal;
+    private TransferSummaryResponse? _selectedTransferForAction;
+    private string _acceptTargetBedId = "";
+    private List<BedResponse> _availableBedsForAction = [];
+
+    // Modal: Tamamla
+    private bool _showCompleteModal;
+    private string _completeTargetBedId = "";
+
+    // Modal: İptal
+    private bool _showCancelModal;
+    private string _cancelReason = "Hasta durumu transfer edilmeden serviste tedaviye uygun görüldü.";
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadWardsAsync();
+        await RefreshDataAsync();
+    }
+
+    private async Task LoadWardsAsync()
+    {
+        try
+        {
+            _wards = await InpatientApi.GetTransferDestinationWardsAsync();
+        }
+        catch
+        {
+            _wards = [];
+        }
+    }
+
+    private async Task RefreshDataAsync()
+    {
+        _isLoading = true;
+        _errorMessage = null;
+        try
+        {
+            Guid? targetWardFilter = Guid.TryParse(_selectedTargetWardId, out var wid) ? wid : null;
+            _transfers = await InpatientApi.GetTransfersAsync(
+                targetWardId: targetWardFilter,
+                status: string.IsNullOrWhiteSpace(_selectedStatus) ? null : _selectedStatus);
+
+            _activeAdmissions = await InpatientApi.GetAdmissionsAsync(status: "Admitted");
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"Veriler yüklenirken hata oluştu: {ex.Message}";
+        }
+        finally
+        {
+            _isLoading = false;
+            StateHasChanged();
+        }
+    }
+
+    private void OpenNewTransferModal()
+    {
+        _showNewTransferModal = true;
+        if (_activeAdmissions.Count > 0 && string.IsNullOrWhiteSpace(_newAdmissionId))
+        {
+            _newAdmissionId = _activeAdmissions[0].Id.ToString();
+        }
+        if (_wards.Count > 0 && string.IsNullOrWhiteSpace(_newTargetWardId))
+        {
+            _newTargetWardId = _wards[0].Id.ToString();
+            _ = OnNewTargetWardSelectedAsync();
+        }
+    }
+
+    private async Task OnNewTargetWardSelectedAsync()
+    {
+        if (Guid.TryParse(_newTargetWardId, out var wardId))
+        {
+            _availableBedsForTargetWard = await InpatientApi.GetBedsAsync(wardId: wardId, status: "Available");
+        }
+        else
+        {
+            _availableBedsForTargetWard = [];
+        }
+        StateHasChanged();
+    }
+
+    private async Task SubmitNewTransferAsync()
+    {
+        if (!Guid.TryParse(_newAdmissionId, out var admissionId))
+        {
+            _errorMessage = "Lütfen aktif bir yatış seçiniz.";
+            return;
+        }
+
+        if (!Guid.TryParse(_newTargetWardId, out var targetWardId))
+        {
+            _errorMessage = "Lütfen hedef bir servis seçiniz.";
+            return;
+        }
+
+        Guid? targetBedId = Guid.TryParse(_newTargetBedId, out var bid) ? bid : null;
+
+        var req = new CreateTransferRequest
+        {
+            AdmissionId = admissionId,
+            TargetWardId = targetWardId,
+            TargetBedId = targetBedId,
+            TransferReason = _newTransferReason,
+            ClinicalNotes = _newClinicalNotes,
+        };
+
+        var result = await InpatientApi.RequestTransferAsync(req);
+        if (result != null)
+        {
+            _showNewTransferModal = false;
+            _successMessage = "Transfer talebi başarıyla oluşturuldu.";
+            await RefreshDataAsync();
+        }
+        else
+        {
+            _errorMessage = "Transfer talebi oluşturulamadı. Bekleyen başka transfer olabilir veya hedef yatak müsait değil.";
+        }
+    }
+
+    private async Task OpenAcceptModal(TransferSummaryResponse transfer)
+    {
+        _selectedTransferForAction = transfer;
+        _showAcceptModal = true;
+        _availableBedsForAction = await InpatientApi.GetBedsAsync(wardId: transfer.TargetWardId, status: "Available");
+        if (transfer.TargetBedId.HasValue)
+        {
+            _acceptTargetBedId = transfer.TargetBedId.Value.ToString();
+        }
+    }
+
+    private async Task SubmitAcceptTransferAsync()
+    {
+        if (_selectedTransferForAction == null) return;
+
+        Guid? bedId = Guid.TryParse(_acceptTargetBedId, out var bid) ? bid : null;
+        var result = await InpatientApi.AcceptTransferAsync(_selectedTransferForAction.Id, new AcceptTransferRequest { TargetBedId = bedId });
+        if (result != null)
+        {
+            _showAcceptModal = false;
+            _successMessage = "Transfer talebi kabul edildi.";
+            await RefreshDataAsync();
+        }
+        else
+        {
+            _errorMessage = "Transfer kabul işlemi başarısız oldu.";
+        }
+    }
+
+    private async Task OpenCompleteModal(TransferSummaryResponse transfer)
+    {
+        _selectedTransferForAction = transfer;
+        _showCompleteModal = true;
+        _availableBedsForAction = await InpatientApi.GetBedsAsync(wardId: transfer.TargetWardId, status: "Available");
+        if (transfer.TargetBedId.HasValue)
+        {
+            _completeTargetBedId = transfer.TargetBedId.Value.ToString();
+        }
+        else if (_availableBedsForAction.Count > 0)
+        {
+            _completeTargetBedId = _availableBedsForAction[0].Id.ToString();
+        }
+    }
+
+    private async Task SubmitCompleteTransferAsync()
+    {
+        if (_selectedTransferForAction == null || !Guid.TryParse(_completeTargetBedId, out var bedId))
+        {
+            _errorMessage = "Lütfen hastanın yerleştirileceği hedef yatağı seçiniz.";
+            return;
+        }
+
+        var result = await InpatientApi.CompleteTransferAsync(_selectedTransferForAction.Id, new CompleteTransferRequest { TargetBedId = bedId });
+        if (result != null)
+        {
+            _showCompleteModal = false;
+            _successMessage = "Transfer başarıyla tamamlandı. Eski yatak temizlik durumuna alındı.";
+            await RefreshDataAsync();
+        }
+        else
+        {
+            _errorMessage = "Transfer tamamlama işlemi başarısız oldu.";
+        }
+    }
+
+    private void OpenCancelModal(TransferSummaryResponse transfer)
+    {
+        _selectedTransferForAction = transfer;
+        _showCancelModal = true;
+    }
+
+    private async Task SubmitCancelTransferAsync()
+    {
+        if (_selectedTransferForAction == null) return;
+
+        var result = await InpatientApi.CancelTransferAsync(_selectedTransferForAction.Id, new CancelTransferRequest { Reason = _cancelReason });
+        if (result != null)
+        {
+            _showCancelModal = false;
+            _successMessage = "Transfer talebi iptal edildi.";
+            await RefreshDataAsync();
+        }
+        else
+        {
+            _errorMessage = "Transfer iptal işlemi başarısız oldu.";
+        }
+    }
+
+    private static RenderFragment RenderStatusBadge(string status) => builder =>
+    {
+        var (cls, text) = status switch
+        {
+            "Requested" => ("bg-warning text-dark", "Talep Edildi"),
+            "Accepted" => ("bg-info text-dark", "Kabul Edildi (Yatak Bekliyor)"),
+            "Completed" => ("bg-success text-white", "Tamamlandı"),
+            "Cancelled" => ("bg-danger text-white", "İptal Edildi"),
+            _ => ("bg-light text-dark", status),
+        };
+
+        builder.OpenElement(0, "span");
+        builder.AddAttribute(1, "class", $"badge {cls}");
+        builder.AddContent(2, text);
+        builder.CloseElement();
+    };
+}

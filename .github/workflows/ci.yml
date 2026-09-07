@@ -1,0 +1,73 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    name: quality
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    env:
+      DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+      DOTNET_NOLOGO: "true"
+      NUGET_PACKAGES: ${{ github.workspace }}/.nuget/packages
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up .NET SDK
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: global.json
+          cache: true
+          cache-dependency-path: "**/packages.lock.json"
+
+      - name: Restore locked dependencies
+        run: dotnet restore HospitalManagement.slnx --locked-mode
+
+      - name: Verify formatting
+        run: dotnet format HospitalManagement.slnx --no-restore --verify-no-changes
+
+      - name: Build
+        run: dotnet build HospitalManagement.slnx --configuration Release --no-restore
+
+      - name: Check dependency vulnerabilities
+        shell: pwsh
+        run: ./tools/test-dependency-vulnerabilities.ps1
+
+      - name: Install Playwright Chromium
+        shell: pwsh
+        run: ./tests/HospitalManagement.EndToEndTests/bin/Release/net10.0/playwright.ps1 install --with-deps chromium
+
+      - name: Test with coverage
+        run: >-
+          dotnet test HospitalManagement.slnx
+          --configuration Release
+          --no-build
+          --no-restore
+          --collect:"XPlat Code Coverage"
+          --results-directory ./artifacts/test-results
+
+      - name: Upload test and coverage reports
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: test-and-coverage-reports
+          path: artifacts/test-results
+          if-no-files-found: warn
+          retention-days: 14

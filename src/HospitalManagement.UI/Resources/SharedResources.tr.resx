@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <resheader name="resmimetype">
+    <value>text/microsoft-resx</value>
+  </resheader>
+  <resheader name="version">
+    <value>2.0</value>
+  </resheader>
+  <resheader name="reader">
+    <value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </resheader>
+  <resheader name="writer">
+    <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </resheader>
+  <data name="AppName" xml:space="preserve"><value>Hastane Yönetim Sistemi</value></data>
+  <data name="AppShortName" xml:space="preserve"><value>HYS</value></data>
+  <data name="DemoEnvironment" xml:space="preserve"><value>DEMO ortamı</value></data>
+  <data name="DemoHospital" xml:space="preserve"><value>Genel Hastane</value></data>
+  <data name="SkipToMainContent" xml:space="preserve"><value>Ana içeriğe geç</value></data>
+  <data name="PrimaryNavigation" xml:space="preserve"><value>Ana menü</value></data>
+  <data name="GeneralOverview" xml:space="preserve"><value>Genel bakış</value></data>
+  <data name="InterfaceStates" xml:space="preserve"><value>Arayüz durumları</value></data>
+  <data name="InternetRequired" xml:space="preserve"><value>İnternet bağlantısı gerekli</value></data>
+  <data name="SyntheticDataOnly" xml:space="preserve"><value>Yalnız sentetik veri</value></data>
+  <data name="PortfolioNotice" xml:space="preserve"><value>Eğitim ve portföy amaçlı DEMO ürün</value></data>
+  <data name="ClientError" xml:space="preserve"><value>Beklenmeyen bir istemci hatası oluştu.</value></data>
+  <data name="Reload" xml:space="preserve"><value>Yenile</value></data>
+  <data name="DismissError" xml:space="preserve"><value>Hata bildirimini kapat</value></data>
+  <data name="HomePageTitle" xml:space="preserve"><value>Genel Bakış | Hastane Yönetim Sistemi</value></data>
+  <data name="HomeEyebrow" xml:space="preserve"><value>Güvenli DEMO çalışma alanı</value></data>
+  <data name="HomeHeading" xml:space="preserve"><value>Hastane operasyonları, tek ve anlaşılır bir görünümde.</value></data>
+  <data name="HomeDescription" xml:space="preserve"><value>Randevudan reçeteye, tanısal hizmetlerden yatış süreçlerine kadar tüm modüller aynı güvenli ürün kabuğunda gelişecek.</value></data>
+  <data name="ReviewInterfaceStates" xml:space="preserve"><value>Durum bileşenlerini incele</value></data>
+  <data name="ExampleMetrics" xml:space="preserve"><value>Örnek operasyon görünümü</value></data>
+  <data name="ExampleMetricsDescription" xml:space="preserve"><value>Aşağıdaki değerler yalnızca arayüz yerleşimini göstermek için üretilmiş sentetik DEMO verilerdir.</value></data>
+  <data name="AppointmentsToday" xml:space="preserve"><value>Bugünkü randevular</value></data>
+  <data name="PendingResults" xml:space="preserve"><value>Bekleyen sonuçlar</value></data>
+  <data name="ActiveAdmissions" xml:space="preserve"><value>Aktif yatışlar</value></data>
+  <data name="PrescriptionsToDispense" xml:space="preserve"><value>Teslim bekleyen reçeteler</value></data>
+  <data name="PlannedModules" xml:space="preserve"><value>Planlanan çalışma alanları</value></data>
+  <data name="PlannedModulesDescription" xml:space="preserve"><value>Modüller, yol haritasındaki fazlar tamamlandıkça bu kabuğa eklenecek.</value></data>
+  <data name="PatientAndAppointment" xml:space="preserve"><value>Hasta ve randevu</value></data>
+  <data name="PatientAndAppointmentDescription" xml:space="preserve"><value>Hasta kaydı, uygunluk, randevu ve check-in akışları.</value></data>
+  <data name="ClinicalCare" xml:space="preserve"><value>Klinik bakım</value></data>
+  <data name="ClinicalCareDescription" xml:space="preserve"><value>Karşılaşma, vital bulgu, klinik not ve bakım planları.</value></data>
+  <data name="Diagnostics" xml:space="preserve"><value>Tanısal hizmetler</value></data>
+  <data name="DiagnosticsDescription" xml:space="preserve"><value>Laboratuvar, radyoloji, numune ve sonuç iş listeleri.</value></data>
+  <data name="PharmacyAndInventory" xml:space="preserve"><value>Eczane ve stok</value></data>
+  <data name="PharmacyAndInventoryDescription" xml:space="preserve"><value>İmzalı reçete, teslim ve güvenli stok hareketleri.</value></data>
+  <data name="ComingInLaterPhase" xml:space="preserve"><value>İlerleyen fazda</value></data>
+  <data name="SecurityCalloutTitle" xml:space="preserve"><value>Güvenlik arayüzde başlamaz, API’de uygulanır.</value></data>
+  <data name="SecurityCalloutDescription" xml:space="preserve"><value>Menülerin görünürlüğü kolaylık sağlar; gerçek erişim kararı permission, kaynak kapsamı ve bakım ilişkisiyle sunucuda verilir.</value></data>
+  <data name="StatePageTitle" xml:space="preserve"><value>Arayüz Durumları | Hastane Yönetim Sistemi</value></data>
+  <data name="StatePageEyebrow" xml:space="preserve"><value>Paylaşılabilir RCL bileşenleri</value></data>
+  <data name="StatePageHeading" xml:space="preserve"><value>Her veri durumu için aynı, erişilebilir dil.</value></data>
+  <data name="StatePageDescription" xml:space="preserve"><value>Bu örnekler Web ve gelecekteki MAUI istemcilerinde loading, empty, error ve forbidden davranışlarını tutarlı gösterir.</value></data>
+  <data name="LoadingStateTitle" xml:space="preserve"><value>Bilgiler yükleniyor</value></data>
+  <data name="LoadingStateDescription" xml:space="preserve"><value>Güncel veriler güvenli kaynaktan alınıyor. Lütfen bekleyin.</value></data>
+  <data name="EmptyStateTitle" xml:space="preserve"><value>Henüz kayıt yok</value></data>
+  <data name="EmptyStateDescription" xml:space="preserve"><value>Bu görünümde gösterilecek bir DEMO kayıt bulunmuyor.</value></data>
+  <data name="ErrorStateTitle" xml:space="preserve"><value>Bilgiler alınamadı</value></data>
+  <data name="ErrorStateDescription" xml:space="preserve"><value>İstek güvenli biçimde tamamlanamadı. Bağlantınızı kontrol edip yeniden deneyin.</value></data>
+  <data name="ForbiddenStateTitle" xml:space="preserve"><value>Bu alana erişiminiz yok</value></data>
+  <data name="ForbiddenStateDescription" xml:space="preserve"><value>Göreviniz ve kaynak kapsamınız bu içeriği görüntülemeye izin vermiyor.</value></data>
+  <data name="ReturnToOverview" xml:space="preserve"><value>Genel bakışa dön</value></data>
+  <data name="Retry" xml:space="preserve"><value>Yeniden dene</value></data>
+  <data name="NotFoundPageTitle" xml:space="preserve"><value>Sayfa Bulunamadı | Hastane Yönetim Sistemi</value></data>
+  <data name="NotFoundTitle" xml:space="preserve"><value>Sayfa bulunamadı</value></data>
+  <data name="NotFoundDescription" xml:space="preserve"><value>Aradığınız içerik taşınmış, kaldırılmış veya henüz kullanıma açılmamış olabilir.</value></data>
+  <data name="DemoBannerTitle" xml:space="preserve"><value>EĞİTİM VE SİMÜLASYON ORTAMI</value></data>
+  <data name="DemoBannerWarning" xml:space="preserve"><value>Gerçek hasta verisi, gerçek T.C. kimlik numarası veya gerçek sağlık kaydı girmeyiniz. Yalnız sentetik DEMO veriler kullanılır.</value></data>
+  <data name="DemoBannerDisclaimer" xml:space="preserve"><value>Bu sistem sertifikalı bir HBYS veya klinik karar destek aracı değildir; eğitim ve portföy amacıyla geliştirilmektedir.</value></data>
+</root>

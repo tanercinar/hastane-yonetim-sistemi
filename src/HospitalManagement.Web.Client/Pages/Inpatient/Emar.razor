@@ -1,0 +1,710 @@
+@page "/inpatient/emar"
+@using HospitalManagement.Contracts.Inpatient
+@using HospitalManagement.Web.Client.Inpatient
+@inject IInpatientApiClient InpatientApi
+
+<div class="container-fluid py-3">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <div>
+            <h2 class="fw-bold mb-0">İlaç Uygulama Kaydı (eMAR)</h2>
+            <p class="text-muted mb-0">Elektronik ilaç uygulama kaydı, 5 Doğru Kuralı doğrulaması ve doz güvenliği takibi.</p>
+        </div>
+        <div class="d-flex gap-2">
+            <button class="btn btn-outline-primary" @onclick="RefreshDataAsync">
+                <i class="bi bi-arrow-clockwise me-1"></i> Yenile
+            </button>
+        </div>
+    </div>
+
+    @if (!string.IsNullOrWhiteSpace(_successMessage))
+    {
+        <div class="alert alert-success alert-dismissible fade show" role="alert">
+            <i class="bi bi-check-circle-fill me-2"></i>@_successMessage
+            <button type="button" class="btn-close" @onclick="() => _successMessage = null"></button>
+        </div>
+    }
+
+    @if (!string.IsNullOrWhiteSpace(_errorMessage))
+    {
+        <div class="alert alert-danger alert-dismissible fade show" role="alert">
+            <i class="bi bi-exclamation-triangle-fill me-2"></i>@_errorMessage
+            <button type="button" class="btn-close" @onclick="() => _errorMessage = null"></button>
+        </div>
+    }
+
+    <!-- Hasta Seçimi Kartı -->
+    <div class="card shadow-sm border-0 mb-4">
+        <div class="card-body">
+            <div class="row g-3 align-items-center">
+                <div class="col-md-6">
+                    <label class="form-label fw-bold">Yatan Hasta Seçiniz:</label>
+                    <select class="form-select form-select-lg" @bind="_selectedAdmissionId" @bind:after="OnAdmissionChangedAsync">
+                        <option value="">-- Lütfen Hasta Seçiniz --</option>
+                        @foreach (var adm in _activeAdmissions)
+                        {
+                            <option value="@adm.Id">@adm.AdmissionNumber - Hasta: @adm.PatientId.ToString().Substring(0, 8) (@adm.WardName / Yatak: @adm.BedNumber)</option>
+                        }
+                    </select>
+                </div>
+                <div class="col-md-6 text-md-end">
+                    @if (!string.IsNullOrWhiteSpace(_selectedAdmissionId))
+                    {
+                        <button class="btn btn-primary mt-3 mt-md-0" @onclick="OpenScheduleModal">
+                            <i class="bi bi-plus-circle me-1"></i> Yeni İlaç Dozu Planla
+                        </button>
+                    }
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Sekmeler -->
+    <ul class="nav nav-pills mb-4">
+        <li class="nav-item">
+            <button class="nav-link @(_activeTab == "due" ? "active" : "")" @onclick='() => _activeTab = "due"'>
+                <i class="bi bi-hourglass-split me-1"></i> Bekleyen & Planlanan Dozlar (@_dueMeds.Count)
+            </button>
+        </li>
+        <li class="nav-item">
+            <button class="nav-link @(_activeTab == "administered" ? "active" : "")" @onclick='() => _activeTab = "administered"'>
+                <i class="bi bi-check2-all me-1"></i> Uygulanan Dozlar (@_administeredMeds.Count)
+            </button>
+        </li>
+        <li class="nav-item">
+            <button class="nav-link @(_activeTab == "other" ? "active" : "")" @onclick='() => _activeTab = "other"'>
+                <i class="bi bi-slash-circle me-1"></i> Atlanan & Reddedilenler (@_otherMeds.Count)
+            </button>
+        </li>
+    </ul>
+
+    @if (_isLoading)
+    {
+        <div class="text-center py-5">
+            <div class="spinner-border text-primary" role="status">
+                <span class="visually-hidden">Yükleniyor...</span>
+            </div>
+            <p class="text-muted mt-2">eMAR kayıtları yükleniyor...</p>
+        </div>
+    }
+    else if (string.IsNullOrWhiteSpace(_selectedAdmissionId))
+    {
+        <div class="alert alert-info">Lütfen eMAR ilaç kayıtlarını görüntülemek için yukarıdan bir yatan hasta seçiniz.</div>
+    }
+    else
+    {
+        @if (_activeTab == "due")
+        {
+            @if (_dueMeds.Count == 0)
+            {
+                <div class="alert alert-success"><i class="bi bi-check-circle me-2"></i>Bu hasta için bekleyen veya planlanmış herhangi bir ilaç dozu bulunmamaktadır.</div>
+            }
+            else
+            {
+                <div class="card shadow-sm border-0">
+                    <div class="table-responsive">
+                        <table class="table table-hover align-middle mb-0">
+                            <thead class="table-light">
+                                <tr>
+                                    <th>İlaç Adı</th>
+                                    <th>Doz</th>
+                                    <th>Uygulama Yolu</th>
+                                    <th>Planlanan Vakit</th>
+                                    <th>Durum</th>
+                                    <th class="text-end">eMAR İşlemleri</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var med in _dueMeds)
+                                {
+                                    <tr>
+                                        <td class="fw-bold text-primary">
+                                            <i class="bi bi-capsule me-2"></i>@med.MedicationName
+                                        </td>
+                                        <td><span class="badge bg-light text-dark border">@med.Dose</span></td>
+                                        <td><span class="badge bg-info text-dark">@med.Route</span></td>
+                                        <td>@med.ScheduledTimeUtc.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</td>
+                                        <td>
+                                            @if (med.Status == "Delayed")
+                                            {
+                                                <span class="badge bg-warning text-dark"><i class="bi bi-clock-history me-1"></i>Ertelendi</span>
+                                            }
+                                            else
+                                            {
+                                                <span class="badge bg-secondary"><i class="bi bi-calendar-check me-1"></i>Planlandı</span>
+                                            }
+                                        </td>
+                                        <td class="text-end">
+                                            <div class="btn-group btn-group-sm">
+                                                <button class="btn btn-success" @onclick="() => OpenAdministerModal(med)" title="5 Doğru Doğrulaması ile İlacı Uygula">
+                                                    <i class="bi bi-check2-circle me-1"></i> Uygula
+                                                </button>
+                                                <button class="btn btn-outline-warning" @onclick="() => OpenDelayModal(med)" title="Dozu Ertele">
+                                                    <i class="bi bi-clock-history"></i>
+                                                </button>
+                                                <button class="btn btn-outline-secondary" @onclick="() => OpenSkipModal(med)" title="Dozu Atla">
+                                                    <i class="bi bi-skip-forward"></i>
+                                                </button>
+                                                <button class="btn btn-outline-danger" @onclick="() => OpenRefuseModal(med)" title="Hasta Reddetti">
+                                                    <i class="bi bi-hand-thumbs-down"></i>
+                                                </button>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            }
+        }
+        else if (_activeTab == "administered")
+        {
+            @if (_administeredMeds.Count == 0)
+            {
+                <div class="alert alert-info">Bu hasta için henüz uygulanmış ilaç kaydı bulunmamaktadır.</div>
+            }
+            else
+            {
+                <div class="card shadow-sm border-0">
+                    <div class="table-responsive">
+                        <table class="table table-hover align-middle mb-0">
+                            <thead class="table-light">
+                                <tr>
+                                    <th>İlaç</th>
+                                    <th>Doz</th>
+                                    <th>Yol</th>
+                                    <th>Planlanan Vakit</th>
+                                    <th>Uygulanma Zamanı</th>
+                                    <th>5 Doğru Onayı</th>
+                                    <th>Hemşire Notu</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var med in _administeredMeds)
+                                {
+                                    <tr class="table-success">
+                                        <td class="fw-bold"><i class="bi bi-capsule me-2"></i>@med.MedicationName</td>
+                                        <td>@med.Dose</td>
+                                        <td>@med.Route</td>
+                                        <td>@med.ScheduledTimeUtc.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</td>
+                                        <td><strong>@med.AdministeredAtUtc?.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</strong></td>
+                                        <td>
+                                            @if (med.Verified5Rights)
+                                            {
+                                                <span class="badge bg-success"><i class="bi bi-shield-check me-1"></i>Doğrulandı</span>
+                                            }
+                                        </td>
+                                        <td><small class="text-muted">@med.Notes</small></td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            }
+        }
+        else if (_activeTab == "other")
+        {
+            @if (_otherMeds.Count == 0)
+            {
+                <div class="alert alert-info">Atlanan veya reddedilen herhangi bir doz kaydı bulunmamaktadır.</div>
+            }
+            else
+            {
+                <div class="card shadow-sm border-0">
+                    <div class="table-responsive">
+                        <table class="table table-hover align-middle mb-0">
+                            <thead class="table-light">
+                                <tr>
+                                    <th>İlaç</th>
+                                    <th>Doz</th>
+                                    <th>Planlanan Vakit</th>
+                                    <th>Durum</th>
+                                    <th>Gerekçe</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var med in _otherMeds)
+                                {
+                                    <tr class="@(med.Status == "Refused" ? "table-danger" : "table-warning")">
+                                        <td class="fw-bold">@med.MedicationName</td>
+                                        <td>@med.Dose (@med.Route)</td>
+                                        <td>@med.ScheduledTimeUtc.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</td>
+                                        <td>
+                                            @if (med.Status == "Refused")
+                                            {
+                                                <span class="badge bg-danger">Hasta Reddetti</span>
+                                            }
+                                            else
+                                            {
+                                                <span class="badge bg-secondary">Atlandı</span>
+                                            }
+                                        </td>
+                                        <td><span class="text-danger fw-semibold">@med.Reason</span></td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            }
+        }
+    }
+</div>
+
+<!-- Modal: 5 Doğru Kuralı ile Uygula -->
+@if (_showAdministerModal && _selectedMedicationForAction != null)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal-dialog modal-lg modal-dialog-centered">
+            <div class="modal-content border-0 shadow">
+                <div class="modal-header bg-success text-white">
+                    <h5 class="modal-title"><i class="bi bi-shield-check me-2"></i>eMAR İlaç Uygulama Güvenlik Doğrulaması</h5>
+                    <button type="button" class="btn-close btn-close-white" @onclick="() => _showAdministerModal = false"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="alert alert-light border mb-4">
+                        <div class="row">
+                            <div class="col-md-6">
+                                <strong>İlaç:</strong> @_selectedMedicationForAction.MedicationName<br />
+                                <strong>Doz & Yol:</strong> @_selectedMedicationForAction.Dose (@_selectedMedicationForAction.Route)
+                            </div>
+                            <div class="col-md-6">
+                                <strong>Planlanan Zaman:</strong> @_selectedMedicationForAction.ScheduledTimeUtc.ToLocalTime().ToString("dd.MM.yyyy HH:mm")<br />
+                                <strong>Hasta ID:</strong> @_selectedMedicationForAction.PatientId.ToString().Substring(0, 8)
+                            </div>
+                        </div>
+                    </div>
+
+                    <h6 class="fw-bold text-primary mb-3"><i class="bi bi-check2-square me-1"></i>5 Doğru Kuralı Kontrol Listesi (Zorunlu):</h6>
+                    <div class="card p-3 mb-3 bg-light">
+                        <div class="form-check mb-2">
+                            <input class="form-check-input" type="checkbox" id="chkRightPatient" @bind="_chkRightPatient" />
+                            <label class="form-check-label fw-semibold" for="chkRightPatient">1. Doğru Hasta (Hasta kimliği ve bilekliği doğrulandı)</label>
+                        </div>
+                        <div class="form-check mb-2">
+                            <input class="form-check-input" type="checkbox" id="chkRightMed" @bind="_chkRightMed" />
+                            <label class="form-check-label fw-semibold" for="chkRightMed">2. Doğru İlaç (İlaç adı, etken madde ve ambalajı kontrol edildi)</label>
+                        </div>
+                        <div class="form-check mb-2">
+                            <input class="form-check-input" type="checkbox" id="chkRightDose" @bind="_chkRightDose" />
+                            <label class="form-check-label fw-semibold" for="chkRightDose">3. Doğru Doz (@_selectedMedicationForAction.Dose miktarı doğrulandı)</label>
+                        </div>
+                        <div class="form-check mb-2">
+                            <input class="form-check-input" type="checkbox" id="chkRightTime" @bind="_chkRightTime" />
+                            <label class="form-check-label fw-semibold" for="chkRightTime">4. Doğru Zaman (Planlanan saat aralığında veriliyor)</label>
+                        </div>
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="chkRightRoute" @bind="_chkRightRoute" />
+                            <label class="form-check-label fw-semibold" for="chkRightRoute">5. Doğru Yol (@_selectedMedicationForAction.Route uygulama yolu doğrulandı)</label>
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">Hemşire Uygulama Notu:</label>
+                        <textarea class="form-control" rows="2" @bind="_administerNotes" placeholder="Uygulandı, hasta tolere etti, komplikasyon gözlenmedi..."></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" @onclick="() => _showAdministerModal = false">Vazgeç</button>
+                    <button type="button" class="btn btn-success" disabled="@(!IsAll5RightsChecked)" @onclick="SubmitAdministerAsync">
+                        <i class="bi bi-check-lg me-1"></i> İlaç Uygulamasını Onayla
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+<!-- Modal: Yeni İlaç Dozu Planla -->
+@if (_showScheduleModal)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content border-0 shadow">
+                <div class="modal-header bg-primary text-white">
+                    <h5 class="modal-title"><i class="bi bi-plus-circle me-2"></i>Yeni İlaç Dozu Planla</h5>
+                    <button type="button" class="btn-close btn-close-white" @onclick="() => _showScheduleModal = false"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold" for="activeMedicationOrder">Aktif hekim order/reçete kalemi:</label>
+                        @if (_activeMedicationOrders.Count == 0)
+                        {
+                            <div class="alert alert-warning mb-0" role="alert">
+                                Bu yatış için aktif ve imzalı ilaç order/reçetesi bulunamadı. Serbest metinle doz planlanamaz.
+                            </div>
+                        }
+                        else
+                        {
+                            <select id="activeMedicationOrder" class="form-select" @bind="_selectedMedicationOrderId">
+                                @foreach (var order in _activeMedicationOrders)
+                                {
+                                    <option value="@order.PrescriptionItemId">@order.MedicationName — @order.Dose — @order.Route</option>
+                                }
+                            </select>
+                        }
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">Planlanan Uygulama Vakti:</label>
+                        <input type="datetime-local" class="form-control" @bind="_newScheduledTime" />
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" @onclick="() => _showScheduleModal = false">Vazgeç</button>
+                    <button type="button" class="btn btn-primary" @onclick="SubmitScheduleAsync" disabled="@(_activeMedicationOrders.Count == 0)">
+                        <i class="bi bi-save me-1"></i> Dozu Kaydet
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+<!-- Modal: Ertele -->
+@if (_showDelayModal && _selectedMedicationForAction != null)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content border-0 shadow">
+                <div class="modal-header bg-warning text-dark">
+                    <h5 class="modal-title"><i class="bi bi-clock-history me-2"></i>İlaç Dozunu Ertele</h5>
+                    <button type="button" class="btn-close" @onclick="() => _showDelayModal = false"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">Yeni Planlanan Zaman:</label>
+                        <input type="datetime-local" class="form-control" @bind="_delayNewTime" />
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">Erteleme Gerekçesi:</label>
+                        <textarea class="form-control" rows="2" @bind="_delayReason" placeholder="Hasta tetkik için radyolojide, döndüğünde uygulanacak..."></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" @onclick="() => _showDelayModal = false">Vazgeç</button>
+                    <button type="button" class="btn btn-warning" @onclick="SubmitDelayAsync">
+                        <i class="bi bi-clock-history me-1"></i> Ertelemeyi Kaydet
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+<!-- Modal: Atla -->
+@if (_showSkipModal && _selectedMedicationForAction != null)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content border-0 shadow">
+                <div class="modal-header bg-secondary text-white">
+                    <h5 class="modal-title"><i class="bi bi-skip-forward me-2"></i>İlaç Dozunu Atla</h5>
+                    <button type="button" class="btn-close btn-close-white" @onclick="() => _showSkipModal = false"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">Atlanma Gerekçesi:</label>
+                        <textarea class="form-control" rows="2" @bind="_skipReason" placeholder="Doktor sözlü orderı ile doz atlandı..."></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" @onclick="() => _showSkipModal = false">Vazgeç</button>
+                    <button type="button" class="btn btn-secondary" @onclick="SubmitSkipAsync">
+                        <i class="bi bi-check-lg me-1"></i> Atlamayı Kaydet
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+<!-- Modal: Hasta Reddetti -->
+@if (_showRefuseModal && _selectedMedicationForAction != null)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content border-0 shadow">
+                <div class="modal-header bg-danger text-white">
+                    <h5 class="modal-title"><i class="bi bi-hand-thumbs-down me-2"></i>Hasta İlacı Reddetti</h5>
+                    <button type="button" class="btn-close btn-close-white" @onclick="() => _showRefuseModal = false"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">Hastanın Red Gerekçesi:</label>
+                        <textarea class="form-control" rows="2" @bind="_refuseReason" placeholder="Hasta ilacın mide bulantısı yaptığını belirterek almayı reddetti..."></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" @onclick="() => _showRefuseModal = false">Vazgeç</button>
+                    <button type="button" class="btn btn-danger" @onclick="SubmitRefuseAsync">
+                        <i class="bi bi-x-circle me-1"></i> Reddi Kaydet
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private bool _isLoading = true;
+    private string? _successMessage;
+    private string? _errorMessage;
+
+    private string _activeTab = "due";
+    private string _selectedAdmissionId = "";
+    private List<AdmissionSummaryResponse> _activeAdmissions = [];
+    private List<MedicationAdministrationResponse> _allMeds = [];
+    private List<ActiveMedicationOrderResponse> _activeMedicationOrders = [];
+
+    private List<MedicationAdministrationResponse> _dueMeds =>
+        _allMeds.Where(m => m.Status == "Scheduled" || m.Status == "Delayed").ToList();
+
+    private List<MedicationAdministrationResponse> _administeredMeds =>
+        _allMeds.Where(m => m.Status == "Administered").ToList();
+
+    private List<MedicationAdministrationResponse> _otherMeds =>
+        _allMeds.Where(m => m.Status == "Skipped" || m.Status == "Refused").ToList();
+
+    // Modal: 5 Doğru ile Uygula
+    private bool _showAdministerModal;
+    private MedicationAdministrationResponse? _selectedMedicationForAction;
+    private bool _chkRightPatient;
+    private bool _chkRightMed;
+    private bool _chkRightDose;
+    private bool _chkRightTime;
+    private bool _chkRightRoute;
+    private string _administerNotes = "Uygulandı, hasta tolere etti.";
+
+    private bool IsAll5RightsChecked =>
+        _chkRightPatient && _chkRightMed && _chkRightDose && _chkRightTime && _chkRightRoute;
+
+    // Modal: Yeni Doz Planla
+    private bool _showScheduleModal;
+    private string _selectedMedicationOrderId = string.Empty;
+    private DateTime _newScheduledTime = DateTime.UtcNow.AddHours(2);
+
+    private ActiveMedicationOrderResponse? SelectedMedicationOrder =>
+        Guid.TryParse(_selectedMedicationOrderId, out var itemId)
+            ? _activeMedicationOrders.FirstOrDefault(order => order.PrescriptionItemId == itemId)
+            : null;
+
+    // Modal: Ertele
+    private bool _showDelayModal;
+    private DateTime _delayNewTime = DateTime.UtcNow.AddHours(3);
+    private string _delayReason = "Hasta tetkikte olduğundan ertelendi.";
+
+    // Modal: Atla
+    private bool _showSkipModal;
+    private string _skipReason = "Klinik stabilite nedeniyle atlandı.";
+
+    // Modal: Reddet
+    private bool _showRefuseModal;
+    private string _refuseReason = "Hasta ilacı almayı istemedi.";
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadActiveAdmissionsAsync();
+        await RefreshDataAsync();
+    }
+
+    private async Task LoadActiveAdmissionsAsync()
+    {
+        try
+        {
+            _activeAdmissions = await InpatientApi.GetAdmissionsAsync(status: "Admitted");
+            if (_activeAdmissions.Count > 0 && string.IsNullOrWhiteSpace(_selectedAdmissionId))
+            {
+                _selectedAdmissionId = _activeAdmissions[0].Id.ToString();
+            }
+        }
+        catch
+        {
+            _activeAdmissions = [];
+        }
+    }
+
+    private async Task OnAdmissionChangedAsync()
+    {
+        await RefreshDataAsync();
+    }
+
+    private async Task RefreshDataAsync()
+    {
+        _isLoading = true;
+        _errorMessage = null;
+        try
+        {
+            if (Guid.TryParse(_selectedAdmissionId, out var admId))
+            {
+                _allMeds = await InpatientApi.GetMedicationsByAdmissionIdAsync(admId);
+                _activeMedicationOrders = await InpatientApi.GetActiveMedicationOrdersAsync(admId);
+                if (!_activeMedicationOrders.Any(order => order.PrescriptionItemId.ToString() == _selectedMedicationOrderId))
+                {
+                    _selectedMedicationOrderId = _activeMedicationOrders.FirstOrDefault()?.PrescriptionItemId.ToString() ?? string.Empty;
+                }
+            }
+            else
+            {
+                _allMeds = [];
+                _activeMedicationOrders = [];
+                _selectedMedicationOrderId = string.Empty;
+            }
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"eMAR verileri alınırken hata: {ex.Message}";
+        }
+        finally
+        {
+            _isLoading = false;
+            StateHasChanged();
+        }
+    }
+
+    private void OpenAdministerModal(MedicationAdministrationResponse med)
+    {
+        _selectedMedicationForAction = med;
+        _chkRightPatient = false;
+        _chkRightMed = false;
+        _chkRightDose = false;
+        _chkRightTime = false;
+        _chkRightRoute = false;
+        _administerNotes = "Uygulandı, hasta tolere etti.";
+        _showAdministerModal = true;
+    }
+
+    private async Task SubmitAdministerAsync()
+    {
+        if (_selectedMedicationForAction == null || !IsAll5RightsChecked) return;
+
+        var req = new AdministerMedicationRequest
+        {
+            Verified5Rights = true,
+            Notes = _administerNotes,
+        };
+
+        var result = await InpatientApi.AdministerMedicationAsync(_selectedMedicationForAction.Id, req);
+        if (result != null)
+        {
+            _showAdministerModal = false;
+            _successMessage = "İlaç uygulaması başarıyla kaydedildi.";
+            await RefreshDataAsync();
+        }
+        else
+        {
+            _errorMessage = "İlaç uygulama kaydı tamamlanamadı.";
+        }
+    }
+
+    private void OpenScheduleModal()
+    {
+        _newScheduledTime = DateTime.UtcNow.AddHours(2);
+        _showScheduleModal = true;
+    }
+
+    private async Task SubmitScheduleAsync()
+    {
+        if (!Guid.TryParse(_selectedAdmissionId, out var admId) || SelectedMedicationOrder is not { } order) return;
+
+        var req = new ScheduleMedicationRequest
+        {
+            AdmissionId = admId,
+            PrescriptionId = order.PrescriptionId,
+            MedicationName = order.MedicationName,
+            Dose = order.Dose,
+            Route = order.Route,
+            ScheduledTimeUtc = _newScheduledTime,
+        };
+
+        var result = await InpatientApi.ScheduleMedicationAsync(req);
+        if (result != null)
+        {
+            _showScheduleModal = false;
+            _successMessage = "Yeni ilaç dozu başarıyla planlandı.";
+            await RefreshDataAsync();
+        }
+        else
+        {
+            _errorMessage = "İlaç dozu planlanamadı.";
+        }
+    }
+
+    private void OpenDelayModal(MedicationAdministrationResponse med)
+    {
+        _selectedMedicationForAction = med;
+        _delayNewTime = DateTime.UtcNow.AddHours(2);
+        _showDelayModal = true;
+    }
+
+    private async Task SubmitDelayAsync()
+    {
+        if (_selectedMedicationForAction == null) return;
+
+        var req = new DelayMedicationRequest
+        {
+            NewScheduledTimeUtc = _delayNewTime,
+            Reason = _delayReason,
+        };
+
+        var result = await InpatientApi.DelayMedicationAsync(_selectedMedicationForAction.Id, req);
+        if (result != null)
+        {
+            _showDelayModal = false;
+            _successMessage = "İlaç dozu ertelendi.";
+            await RefreshDataAsync();
+        }
+        else
+        {
+            _errorMessage = "Erteleme işlemi başarısız oldu.";
+        }
+    }
+
+    private void OpenSkipModal(MedicationAdministrationResponse med)
+    {
+        _selectedMedicationForAction = med;
+        _showSkipModal = true;
+    }
+
+    private async Task SubmitSkipAsync()
+    {
+        if (_selectedMedicationForAction == null) return;
+
+        var req = new SkipMedicationRequest { Reason = _skipReason };
+        var result = await InpatientApi.SkipMedicationAsync(_selectedMedicationForAction.Id, req);
+        if (result != null)
+        {
+            _showSkipModal = false;
+            _successMessage = "İlaç dozu atlandı olarak kaydedildi.";
+            await RefreshDataAsync();
+        }
+        else
+        {
+            _errorMessage = "Atlama işlemi başarısız oldu.";
+        }
+    }
+
+    private void OpenRefuseModal(MedicationAdministrationResponse med)
+    {
+        _selectedMedicationForAction = med;
+        _showRefuseModal = true;
+    }
+
+    private async Task SubmitRefuseAsync()
+    {
+        if (_selectedMedicationForAction == null) return;
+
+        var req = new RefuseMedicationRequest { Reason = _refuseReason };
+        var result = await InpatientApi.RefuseMedicationAsync(_selectedMedicationForAction.Id, req);
+        if (result != null)
+        {
+            _showRefuseModal = false;
+            _successMessage = "Hasta ilacı reddetti olarak kaydedildi.";
+            await RefreshDataAsync();
+        }
+        else
+        {
+            _errorMessage = "Red kaydı başarısız oldu.";
+        }
+    }
+}

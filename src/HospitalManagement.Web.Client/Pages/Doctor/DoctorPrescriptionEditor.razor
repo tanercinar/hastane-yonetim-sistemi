@@ -1,0 +1,911 @@
+@page "/doctor/prescriptions"
+@page "/doctor/prescriptions/{EncounterId:guid}"
+@using HospitalManagement.Contracts.Pharmacy
+@using HospitalManagement.Web.Client.Identity
+@using HospitalManagement.Web.Client.Pharmacy
+@inject IPharmacyApiClient PharmacyApi
+@inject UserSessionState SessionState
+@inject NavigationManager Navigation
+
+<PageTitle>Doktor Reçete Ekranı — Hastane Yönetim Sistemi</PageTitle>
+
+<header class="page-heading" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: var(--hys-space-3);">
+    <div>
+        <span class="page-eyebrow">Klinik Muayene ve Tedavi</span>
+        <h1 class="page-title">Doktor Reçete Yönetimi</h1>
+        <p class="page-subtitle">Karşılaşmaya bağlı reçete taslağı hazırlayın, ilaç kataloğundan arama yapın, kural tabanlı güvenlik kontrollerini inceleyin ve dijital imzalayın.</p>
+    </div>
+    @if (CurrentPrescription is not null)
+    {
+        <div>
+            <span class="ui-badge @GetStatusBadgeClass(CurrentPrescription.Status)" style="font-size: 1rem; padding: 6px 12px; border-radius: var(--hys-radius-md);">
+                @GetStatusDisplayText(CurrentPrescription.Status)
+            </span>
+        </div>
+    }
+</header>
+
+@if (_isLoading)
+{
+    <LoadingState />
+}
+else if (_isForbidden)
+{
+    <ForbiddenState ActionText="Genel Bakışa Dön" ActionHref="/" />
+}
+else
+{
+    <div style="display: flex; flex-direction: column; gap: var(--hys-space-4);">
+        @if (!string.IsNullOrWhiteSpace(_statusMessage))
+        {
+            <div class="ui-state ui-state--success" role="status" style="padding: var(--hys-space-3); border-radius: var(--hys-radius-md); background: #dcfce7; color: #166534;">
+                @_statusMessage
+            </div>
+        }
+
+        @if (!string.IsNullOrWhiteSpace(_errorMessage))
+        {
+            <div class="ui-state ui-state--danger" role="alert" style="padding: var(--hys-space-3); border-radius: var(--hys-radius-md); background: #fee2e2; color: #991b1b;">
+                @_errorMessage
+            </div>
+        }
+
+        <!-- Karşılaşma ve Hasta Seçim Paneli -->
+        <section class="ui-panel" style="background: var(--hys-color-surface); border: 1px solid var(--hys-color-border); border-radius: var(--hys-radius-lg); padding: var(--hys-space-4);">
+            <h2 style="font-size: 1.125rem; font-weight: 600; margin-bottom: var(--hys-space-3);">Karşılaşma ve Hasta Bilgileri</h2>
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: var(--hys-space-3); align-items: flex-end;">
+                <div>
+                    <label class="ui-label" for="encounterIdInput">Karşılaşma Kimliği (Encounter ID)</label>
+                    <input id="encounterIdInput" type="text" class="ui-input" @bind="_inputEncounterId" placeholder="Örn: 00000000-..." />
+                </div>
+                <div>
+                    <label class="ui-label" for="patientIdInput">Hasta Kimliği (Patient ID)</label>
+                    <input id="patientIdInput" type="text" class="ui-input" value="@_inputPatientId" readonly aria-readonly="true" placeholder="Karşılaşma yüklenince doldurulur" />
+                </div>
+                <div>
+                    <label class="ui-label" for="deptIdInput">Poliklinik / Bölüm</label>
+                    <input id="deptIdInput" type="text" class="ui-input" value="@_inputDepartmentId" readonly aria-readonly="true" placeholder="Karşılaşma yüklenince doldurulur" />
+                </div>
+                <div>
+                    <button class="ui-button ui-button--secondary" type="button" @onclick="LoadEncounterPrescriptionsAsync" style="width: 100%;">
+                        Reçete Yükle / Sorgula
+                    </button>
+                </div>
+            </div>
+        </section>
+
+        <!-- İmzalı / İptal Uyarısı -->
+        @if (CurrentPrescription is not null && CurrentPrescription.Status != "Draft")
+        {
+            <div style="padding: var(--hys-space-3); border-radius: var(--hys-radius-md); background: #f1f5f9; border-left: 4px solid var(--hys-color-primary);">
+                <strong>Klinik Değişmezlik Bildirimi:</strong>
+                @if (CurrentPrescription.Status == "Signed")
+                {
+                    <span> Bu reçete @CurrentPrescription.SignedAtUtc?.ToLocalTime().ToString("dd.MM.yyyy HH:mm") tarihinde imzalanmıştır. İmzalı reçeteler sessizce değiştirilemez. Değişiklik için iptal edip yeni reçete yazınız.</span>
+                }
+                else if (CurrentPrescription.Status == "Cancelled")
+                {
+                    <span> Bu reçete @CurrentPrescription.CancelledAtUtc?.ToLocalTime().ToString("dd.MM.yyyy HH:mm") tarihinde iptal edilmiştir. İptal Gerekçesi: <em>@CurrentPrescription.CancellationReason</em></span>
+                }
+                else
+                {
+                    <span> Bu reçete '@CurrentPrescription.Status' durumundadır ve düzenlemeye kapalıdır.</span>
+                }
+            </div>
+        }
+
+        <!-- İlaç Arama ve Ekleme Paneli (Yalnızca Taslak Modunda) -->
+        @if (CurrentPrescription is null || CurrentPrescription.Status == "Draft")
+        {
+            <section class="ui-panel" style="background: var(--hys-color-surface); border: 1px solid var(--hys-color-border); border-radius: var(--hys-radius-lg); padding: var(--hys-space-4);">
+                <h2 style="font-size: 1.125rem; font-weight: 600; margin-bottom: var(--hys-space-3);">İlaç Kataloğunda Ara ve Reçeteye Ekle</h2>
+                <div style="display: flex; gap: var(--hys-space-3); margin-bottom: var(--hys-space-3);">
+                    <input type="text" class="ui-input" @bind="_medSearchQuery" @bind:event="oninput" @onkeyup="HandleSearchKeyUp" placeholder="İlaç adı, etken madde veya ATC kodu (Örn: Amoksisilin, Parasetamol, J01CA04)..." />
+                    <button class="ui-button ui-button--primary" type="button" @onclick="SearchMedicationsAsync">Ara</button>
+                </div>
+
+                @if (_searchResults is { Count: > 0 })
+                {
+                    <div style="max-height: 240px; overflow-y: auto; border: 1px solid var(--hys-color-border); border-radius: var(--hys-radius-md);">
+                        <table class="ui-table" style="width: 100%; border-collapse: collapse; font-size: 0.875rem;">
+                            <thead>
+                                <tr style="background: var(--hys-color-bg); border-bottom: 1px solid var(--hys-color-border);">
+                                    <th style="padding: var(--hys-space-2);">İlaç Kodu</th>
+                                    <th style="padding: var(--hys-space-2);">Ticari Adı</th>
+                                    <th style="padding: var(--hys-space-2);">Etken Madde</th>
+                                    <th style="padding: var(--hys-space-2);">Form / Doz</th>
+                                    <th style="padding: var(--hys-space-2);">Uygulama Yolu</th>
+                                    <th style="padding: var(--hys-space-2); width: 90px;">Eylem</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var med in _searchResults)
+                                {
+                                    <tr style="border-bottom: 1px solid var(--hys-color-border);">
+                                        <td style="padding: var(--hys-space-2); font-weight: 600;">@med.Code</td>
+                                        <td style="padding: var(--hys-space-2);">@med.BrandName</td>
+                                        <td style="padding: var(--hys-space-2);">@med.GenericName</td>
+                                        <td style="padding: var(--hys-space-2);">@med.Form (@med.StrengthValue @med.StrengthUnit)</td>
+                                        <td style="padding: var(--hys-space-2);">@med.Route</td>
+                                        <td style="padding: var(--hys-space-2);">
+                                            <button class="ui-button ui-button--secondary" type="button" style="padding: 2px 8px; font-size: 0.75rem;" @onclick="() => AddMedicationToPrescription(med)">
+                                                + Ekle
+                                            </button>
+                                        </td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                }
+            </section>
+        }
+
+        <!-- Reçete Kalemleri Listesi -->
+        <section class="ui-panel" style="background: var(--hys-color-surface); border: 1px solid var(--hys-color-border); border-radius: var(--hys-radius-lg); padding: var(--hys-space-4);">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--hys-space-3);">
+                <h2 style="font-size: 1.125rem; font-weight: 600;">Reçete Kalemleri (@_draftItems.Count)</h2>
+                @if (CurrentPrescription is not null)
+                {
+                    <span style="font-size: 0.875rem; color: var(--hys-color-muted);">Reçete No: <strong>@CurrentPrescription.PrescriptionNumber</strong></span>
+                }
+            </div>
+
+            @if (_draftItems.Count == 0)
+            {
+                <EmptyState Title="Reçete Kalemi Yok" Description="Henüz reçeteye eklenmiş ilaç bulunmamaktadır. Yukarıdaki katalog aramasını kullanarak ilaç ekleyin." />
+            }
+            else
+            {
+                <div style="overflow-x: auto;">
+                    <table class="ui-table" style="width: 100%; border-collapse: collapse; text-align: left;">
+                        <thead>
+                            <tr style="background: var(--hys-color-bg); border-bottom: 1px solid var(--hys-color-border);">
+                                <th style="padding: var(--hys-space-3);">İlaç / Etken Madde</th>
+                                <th style="padding: var(--hys-space-3); width: 120px;">Doz</th>
+                                <th style="padding: var(--hys-space-3); width: 120px;">Sıklık</th>
+                                <th style="padding: var(--hys-space-3); width: 100px;">Süre (Gün)</th>
+                                <th style="padding: var(--hys-space-3); width: 110px;">Miktar</th>
+                                <th style="padding: var(--hys-space-3);">Kullanım Talimatı</th>
+                                @if (IsDraftEditable)
+                                {
+                                    <th style="padding: var(--hys-space-3); width: 70px;">Sil</th>
+                                }
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @for (var i = 0; i < _draftItems.Count; i++)
+                            {
+                                var item = _draftItems[i];
+                                var idx = i;
+                                <tr style="border-bottom: 1px solid var(--hys-color-border);">
+                                    <td style="padding: var(--hys-space-3);">
+                                        <div style="font-weight: 600;">@item.BrandName</div>
+                                        <div style="font-size: 0.75rem; color: var(--hys-color-muted);">@item.GenericName (@item.MedicationCode)</div>
+                                    </td>
+                                    <td style="padding: var(--hys-space-3);">
+                                        @if (IsDraftEditable)
+                                        {
+                                            <div style="display: flex; gap: 4px; align-items: center;">
+                                                <input type="number" step="any" class="ui-input" style="padding: 4px 6px; width: 60px;" @bind="item.Dose" @bind:after="RunSafetyCheckAsync" />
+                                                <span style="font-size: 0.75rem;">@item.DoseUnit</span>
+                                            </div>
+                                        }
+                                        else
+                                        {
+                                            <span>@item.Dose @item.DoseUnit</span>
+                                        }
+                                    </td>
+                                    <td style="padding: var(--hys-space-3);">
+                                        @if (IsDraftEditable)
+                                        {
+                                            <select class="ui-input" style="padding: 4px 6px;" @bind="item.Frequency">
+                                                <option value="1x1">1x1 (Günde 1)</option>
+                                                <option value="2x1">2x1 (Günde 2)</option>
+                                                <option value="3x1">3x1 (Günde 3)</option>
+                                                <option value="4x1">4x1 (Günde 4)</option>
+                                                <option value="İhtiyaç halinde">İhtiyaç halinde</option>
+                                            </select>
+                                        }
+                                        else
+                                        {
+                                            <span>@item.Frequency</span>
+                                        }
+                                    </td>
+                                    <td style="padding: var(--hys-space-3);">
+                                        @if (IsDraftEditable)
+                                        {
+                                            <input type="number" class="ui-input" style="padding: 4px 6px; width: 60px;" @bind="item.DurationDays" />
+                                        }
+                                        else
+                                        {
+                                            <span>@item.DurationDays gün</span>
+                                        }
+                                    </td>
+                                    <td style="padding: var(--hys-space-3);">
+                                        @if (IsDraftEditable)
+                                        {
+                                            <div style="display: flex; gap: 4px; align-items: center;">
+                                                <input type="number" class="ui-input" style="padding: 4px 6px; width: 50px;" @bind="item.Quantity" />
+                                                <span style="font-size: 0.75rem;">@item.QuantityUnit</span>
+                                            </div>
+                                        }
+                                        else
+                                        {
+                                            <span>@item.Quantity @item.QuantityUnit</span>
+                                        }
+                                    </td>
+                                    <td style="padding: var(--hys-space-3);">
+                                        @if (IsDraftEditable)
+                                        {
+                                            <input type="text" class="ui-input" style="padding: 4px 6px;" @bind="item.Instructions" placeholder="Örn: Yemeklerden sonra..." />
+                                        }
+                                        else
+                                        {
+                                            <span>@(string.IsNullOrWhiteSpace(item.Instructions) ? "-" : item.Instructions)</span>
+                                        }
+                                    </td>
+                                    @if (IsDraftEditable)
+                                    {
+                                        <td style="padding: var(--hys-space-3);">
+                                            <button class="ui-button ui-button--danger" type="button" style="padding: 2px 6px; font-size: 0.75rem;" @onclick="() => RemoveItem(idx)">
+                                                Sil
+                                            </button>
+                                        </td>
+                                    }
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </section>
+
+        <!-- Kural Tabanlı Güvenlik Uyarıları Paneli (F05-G04) -->
+        @if (_safetyResult is { HasWarnings: true })
+        {
+            <section class="ui-panel" style="background: #fffbeb; border: 1px solid #fef3c7; border-radius: var(--hys-radius-lg); padding: var(--hys-space-4);">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--hys-space-3);">
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <span style="font-size: 1.25rem;">⚠️</span>
+                        <h2 style="font-size: 1.125rem; font-weight: 600; color: #92400e;">
+                            Kural Tabanlı Güvenlik Uyarıları (@_safetyResult.Warnings.Count)
+                        </h2>
+                    </div>
+                    @if (_safetyResult.HasCriticalWarnings)
+                    {
+                        <span class="ui-badge ui-badge--danger" style="padding: 4px 8px; border-radius: var(--hys-radius-sm);">KRİTİK UYARI</span>
+                    }
+                    else
+                    {
+                        <span class="ui-badge ui-badge--warning" style="padding: 4px 8px; border-radius: var(--hys-radius-sm);">DİKKAT</span>
+                    }
+                </div>
+
+                <div style="display: flex; flex-direction: column; gap: var(--hys-space-3);">
+                    @foreach (var w in _safetyResult.Warnings)
+                    {
+                        var isCritical = w.Severity == "Critical";
+                        <div style="padding: var(--hys-space-3); border-radius: var(--hys-radius-md); background: @(isCritical ? "#fee2e2" : "#fef3c7"); border-left: 4px solid @(isCritical ? "#dc2626" : "#d97706");">
+                            <div style="font-weight: 700; color: @(isCritical ? "#991b1b" : "#92400e"); margin-bottom: 2px;">
+                                @w.Title
+                            </div>
+                            <div style="font-size: 0.875rem; color: @(isCritical ? "#7f1d1d" : "#78350f");">
+                                @w.Message
+                            </div>
+                            @if (w.RequiresOverrideReason)
+                            {
+                                <div style="font-size: 0.75rem; font-weight: 600; margin-top: 4px; color: @(isCritical ? "#991b1b" : "#b45309");">
+                                    * Bu uyarı reçete imzalanırken zorunlu geçersiz kılma gerekçesi (Override Reason) gerektirir.
+                                </div>
+                            }
+                        </div>
+                    }
+                </div>
+
+                <div style="margin-top: var(--hys-space-3); font-size: 0.75rem; color: #78350f; font-style: italic;">
+                    @_safetyResult.Disclaimer
+                </div>
+            </section>
+        }
+
+        <!-- Tanı Özeti ve Genel Talimatlar -->
+        <section class="ui-panel" style="background: var(--hys-color-surface); border: 1px solid var(--hys-color-border); border-radius: var(--hys-radius-lg); padding: var(--hys-space-4);">
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: var(--hys-space-3);">
+                <div>
+                    <label class="ui-label" for="diagnosisSummary">Tanı Özeti</label>
+                    <input id="diagnosisSummary" type="text" class="ui-input" @bind="_diagnosisSummary" disabled="@(!IsDraftEditable)" placeholder="Örn: J02.9 Akut Faranjit" />
+                </div>
+                <div>
+                    <label class="ui-label" for="generalInstructions">Genel Hasta Talimatı</label>
+                    <input id="generalInstructions" type="text" class="ui-input" @bind="_generalInstructions" disabled="@(!IsDraftEditable)" placeholder="Örn: Bol sıvı tüketimi, istirahat..." />
+                </div>
+            </div>
+        </section>
+
+        <!-- Eylem Butonları -->
+        <footer style="display: flex; justify-content: flex-end; gap: var(--hys-space-3); flex-wrap: wrap; margin-top: var(--hys-space-2);">
+            @if (IsDraftEditable)
+            {
+                <button class="ui-button ui-button--secondary" type="button" @onclick="RunSafetyCheckAsync" disabled="@(_isSubmitting || _draftItems.Count == 0)">
+                    Güvenlik Kontrolü Yap
+                </button>
+                <button class="ui-button ui-button--secondary" type="button" @onclick="SaveDraftAsync" disabled="@_isSubmitting">
+                    Taslak Olarak Kaydet
+                </button>
+                <button class="ui-button ui-button--primary" type="button" @onclick="HandleSignClickAsync" disabled="@(_isSubmitting || _draftItems.Count == 0)">
+                    Reçeteyi İmzala
+                </button>
+            }
+            else if (CurrentPrescription?.Status == "Signed" || CurrentPrescription?.Status == "PartiallyDispensed")
+            {
+                <button class="ui-button ui-button--danger" type="button" @onclick="OpenCancelModal" disabled="@_isSubmitting">
+                    Reçeteyi İptal Et
+                </button>
+            }
+        </footer>
+    </div>
+}
+
+<!-- Güvenlik Uyarısı Geçersiz Kılma Modalı (F05-G04) -->
+@if (_showOverrideSignModal)
+{
+    <div style="position: fixed; inset: 0; background: rgba(0, 0, 0, 0.5); display: flex; align-items: center; justify-content: center; z-index: 9999;">
+        <div style="background: var(--hys-color-surface); padding: var(--hys-space-5); border-radius: var(--hys-radius-lg); width: 100%; max-width: 540px; display: flex; flex-direction: column; gap: var(--hys-space-4);">
+            <h3 style="font-size: 1.25rem; font-weight: 600; color: #b45309;">Güvenlik Uyarıları — Geçersiz Kılma Gerekçesi</h3>
+            <p style="font-size: 0.875rem; color: var(--hys-color-text);">
+                Reçetenizde tespit edilen güvenlik uyarılarını onaylayarak reçeteyi imzalamak üzeresiniz. Klinik denetim izi için zorunlu hekim gerekçesi giriniz.
+            </p>
+
+            <div style="max-height: 180px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px;">
+                @if (_safetyResult is not null)
+                {
+                    @foreach (var w in _safetyResult.Warnings)
+                    {
+                        <div style="font-size: 0.8125rem; padding: 6px 10px; border-radius: 4px; background: #fef3c7; color: #92400e;">
+                            <strong>@w.Title:</strong> @w.Message
+                        </div>
+                    }
+                }
+            </div>
+
+            <div>
+                <label class="ui-label" for="overrideReasonInput">Geçersiz Kılma Gerekçesi (Zorunlu - En az 5 karakter)</label>
+                <textarea id="overrideReasonInput" class="ui-input" rows="3" @bind="_overrideReason" placeholder="Örn: Fayda-risk değerlendirmesi yapıldı, hasta yakın takip edilecek..."></textarea>
+            </div>
+
+            <div style="display: flex; justify-content: flex-end; gap: var(--hys-space-3);">
+                <button class="ui-button ui-button--secondary" type="button" @onclick="() => _showOverrideSignModal = false">Vazgeç</button>
+                <button class="ui-button ui-button--primary" type="button" @onclick="ConfirmSignWithOverrideAsync" disabled="@(string.IsNullOrWhiteSpace(_overrideReason) || _overrideReason.Trim().Length < 5)">
+                    Gerekçeli İmzala
+                </button>
+            </div>
+        </div>
+    </div>
+}
+
+<!-- İptal Modal Diyaloğu -->
+@if (_showCancelModal)
+{
+    <div style="position: fixed; inset: 0; background: rgba(0, 0, 0, 0.5); display: flex; align-items: center; justify-content: center; z-index: 9999;">
+        <div style="background: var(--hys-color-surface); padding: var(--hys-space-5); border-radius: var(--hys-radius-lg); width: 100%; max-width: 480px; display: flex; flex-direction: column; gap: var(--hys-space-4);">
+            <h3 style="font-size: 1.25rem; font-weight: 600; color: #991b1b;">Reçeteyi İptal Et</h3>
+            <p style="font-size: 0.875rem; color: var(--hys-color-text);">İmzalanmış bir reçetenin iptal edilmesi klinik kayıt bütünlüğü açısından zorunlu gerekçe gerektirir.</p>
+
+            <div>
+                <label class="ui-label" for="cancelReason">İptal Gerekçesi (Zorunlu)</label>
+                <textarea id="cancelReason" class="ui-input" rows="3" @bind="_cancellationReason" placeholder="İptal sebebini detaylı açıklayınız..."></textarea>
+            </div>
+
+            <div style="display: flex; justify-content: flex-end; gap: var(--hys-space-3);">
+                <button class="ui-button ui-button--secondary" type="button" @onclick="() => _showCancelModal = false">Vazgeç</button>
+                <button class="ui-button ui-button--danger" type="button" @onclick="ConfirmCancelAsync" disabled="@string.IsNullOrWhiteSpace(_cancellationReason)">İptali Onayla</button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter]
+    public Guid? EncounterId { get; set; }
+
+    private bool _isLoading = true;
+    private bool _isForbidden;
+    private bool _isSubmitting;
+    private bool _showCancelModal;
+    private bool _showOverrideSignModal;
+    private string? _statusMessage;
+    private string? _errorMessage;
+
+    private string _inputEncounterId = string.Empty;
+    private string _inputPatientId = string.Empty;
+    private string _inputDepartmentId = string.Empty;
+
+    private string _medSearchQuery = string.Empty;
+    private List<MedicationCatalogItemResponse>? _searchResults;
+
+    private PrescriptionDetailResponse? CurrentPrescription { get; set; }
+    private readonly List<DraftItemModel> _draftItems = [];
+    private string? _diagnosisSummary;
+    private string? _generalInstructions;
+    private string _cancellationReason = string.Empty;
+    private string _overrideReason = string.Empty;
+    private MedicationSafetyCheckResponse? _safetyResult;
+
+    private bool IsDraftEditable => CurrentPrescription is null || CurrentPrescription.Status == "Draft";
+
+    protected override async Task OnInitializedAsync()
+    {
+        await SessionState.EnsureLoadedAsync();
+
+        if (!SessionState.IsAuthenticated)
+        {
+            Navigation.NavigateTo("account/login");
+            return;
+        }
+
+        if (!SessionState.IsDoctor)
+        {
+            _isForbidden = true;
+            _isLoading = false;
+            return;
+        }
+
+        if (EncounterId.HasValue && EncounterId.Value != Guid.Empty)
+        {
+            _inputEncounterId = EncounterId.Value.ToString();
+            await LoadEncounterPrescriptionsAsync();
+        }
+        else
+        {
+            _isLoading = false;
+        }
+    }
+
+    private async Task HandleSearchKeyUp(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter")
+        {
+            await SearchMedicationsAsync();
+        }
+    }
+
+    private async Task SearchMedicationsAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_medSearchQuery))
+        {
+            _searchResults = null;
+            return;
+        }
+
+        try
+        {
+            var results = await PharmacyApi.SearchMedicationsAsync(_medSearchQuery.Trim());
+            _searchResults = results?.ToList() ?? [];
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"İlaç araması sırasında hata: {ex.Message}";
+        }
+    }
+
+    private async Task AddMedicationToPrescription(MedicationCatalogItemResponse med)
+    {
+        _draftItems.Add(new DraftItemModel
+        {
+            MedicationCatalogItemId = med.Id,
+            MedicationCode = med.Code,
+            BrandName = med.BrandName,
+            GenericName = med.GenericName,
+            Form = med.Form,
+            Route = med.Route,
+            Dose = med.StrengthValue > 0 ? med.StrengthValue : 1,
+            DoseUnit = med.StrengthUnit,
+            Frequency = "1x1",
+            DurationDays = 7,
+            Quantity = 1,
+            QuantityUnit = "kutu",
+            Instructions = "Yemeklerden sonra bol su ile.",
+        });
+
+        _statusMessage = $"'{med.BrandName}' reçeteye eklendi.";
+        await RunSafetyCheckAsync();
+    }
+
+    private async Task RemoveItem(int index)
+    {
+        if (index >= 0 && index < _draftItems.Count)
+        {
+            var removed = _draftItems[index];
+            _draftItems.RemoveAt(index);
+            _statusMessage = $"'{removed.BrandName}' reçeteden çıkarıldı.";
+            await RunSafetyCheckAsync();
+        }
+    }
+
+    private async Task RunSafetyCheckAsync()
+    {
+        if (_draftItems.Count == 0 || !Guid.TryParse(_inputPatientId, out var patId))
+        {
+            _safetyResult = null;
+            return;
+        }
+
+        try
+        {
+            var req = new MedicationSafetyCheckRequest
+            {
+                PatientId = patId,
+                EncounterId = Guid.TryParse(_inputEncounterId, out var encId) ? encId : null,
+                Items = _draftItems.Select(i => new MedicationSafetyItemRequest
+                {
+                    MedicationCatalogItemId = i.MedicationCatalogItemId,
+                    Dose = i.Dose,
+                    DoseUnit = i.DoseUnit,
+                    Frequency = i.Frequency,
+                    DurationDays = i.DurationDays,
+                }).ToList(),
+            };
+
+            _safetyResult = await PharmacyApi.CheckMedicationSafetyAsync(req);
+        }
+        catch
+        {
+            _safetyResult = null;
+            _errorMessage = "İlaç güvenliği kontrolü tamamlanamadı. Reçete imzalanmadan önce yeniden deneyiniz.";
+        }
+    }
+
+    private async Task LoadEncounterPrescriptionsAsync()
+    {
+        _errorMessage = null;
+        _statusMessage = null;
+
+        if (!Guid.TryParse(_inputEncounterId, out var encId))
+        {
+            _errorMessage = "Lütfen geçerli bir Karşılaşma Kimliği (GUID) giriniz.";
+            return;
+        }
+
+        _isLoading = true;
+        try
+        {
+            var encounter = await PharmacyApi.GetEncounterAsync(encId);
+            if (encounter is null)
+            {
+                _errorMessage = "Karşılaşma bulunamadı veya bu karşılaşmayı görüntüleme yetkiniz yok.";
+                CurrentPrescription = null;
+                return;
+            }
+
+            _inputPatientId = encounter.PatientId.ToString();
+            _inputDepartmentId = encounter.DepartmentId.ToString();
+
+            var list = await PharmacyApi.GetPrescriptionsByEncounterAsync(encId);
+            if (list is { Count: > 0 })
+            {
+                var latest = list[0];
+                var details = await PharmacyApi.GetPrescriptionByIdAsync(latest.Id);
+                if (details is not null)
+                {
+                    CurrentPrescription = details;
+                    _diagnosisSummary = details.DiagnosisSummary;
+                    _generalInstructions = details.GeneralInstructions;
+                    _inputPatientId = details.PatientId.ToString();
+                    _inputDepartmentId = details.DepartmentId.ToString();
+
+                    _draftItems.Clear();
+                    foreach (var it in details.Items)
+                    {
+                        _draftItems.Add(new DraftItemModel
+                        {
+                            MedicationCatalogItemId = it.MedicationCatalogItemId,
+                            MedicationCode = it.MedicationCode,
+                            BrandName = it.BrandName,
+                            GenericName = it.GenericName,
+                            Form = it.Form,
+                            Route = it.Route,
+                            Dose = it.Dose,
+                            DoseUnit = it.DoseUnit,
+                            Frequency = it.Frequency,
+                            DurationDays = it.DurationDays,
+                            Quantity = it.Quantity,
+                            QuantityUnit = it.QuantityUnit,
+                            Instructions = it.Instructions,
+                        });
+                    }
+
+                    if (details.Status == "Draft")
+                    {
+                        await RunSafetyCheckAsync();
+                    }
+                }
+            }
+            else
+            {
+                CurrentPrescription = null;
+                _draftItems.Clear();
+                _diagnosisSummary = null;
+                _generalInstructions = null;
+                _safetyResult = null;
+            }
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"Reçeteler yüklenirken hata oluştu: {ex.Message}";
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+    }
+
+    private async Task SaveDraftAsync()
+    {
+        if (!ValidateInputs(out var encId, out var patId, out var deptId))
+        {
+            return;
+        }
+
+        _isSubmitting = true;
+        _errorMessage = null;
+        _statusMessage = null;
+
+        try
+        {
+            var items = _draftItems.Select(i => new CreatePrescriptionDraftItemRequest
+            {
+                MedicationCatalogItemId = i.MedicationCatalogItemId,
+                Dose = i.Dose,
+                DoseUnit = i.DoseUnit,
+                Frequency = i.Frequency,
+                DurationDays = i.DurationDays,
+                Quantity = i.Quantity,
+                QuantityUnit = i.QuantityUnit,
+                Instructions = i.Instructions,
+            }).ToList();
+
+            if (CurrentPrescription is null)
+            {
+                var req = new CreatePrescriptionDraftRequest
+                {
+                    EncounterId = encId,
+                    PatientId = patId,
+                    DepartmentId = deptId,
+                    DiagnosisSummary = _diagnosisSummary,
+                    GeneralInstructions = _generalInstructions,
+                    Items = items,
+                };
+
+                var res = await PharmacyApi.CreatePrescriptionDraftAsync(req);
+                if (res is not null)
+                {
+                    CurrentPrescription = res;
+                    _statusMessage = $"Reçete taslağı başarıyla oluşturuldu: {res.PrescriptionNumber}";
+                    await RunSafetyCheckAsync();
+                }
+                else
+                {
+                    _errorMessage = "Reçete taslağı oluşturulamadı.";
+                }
+            }
+            else
+            {
+                var req = new UpdatePrescriptionDraftRequest
+                {
+                    ExpectedVersion = CurrentPrescription.Version,
+                    DiagnosisSummary = _diagnosisSummary,
+                    GeneralInstructions = _generalInstructions,
+                    Items = items,
+                };
+
+                var res = await PharmacyApi.UpdatePrescriptionDraftAsync(CurrentPrescription.Id, req);
+                if (res is not null)
+                {
+                    CurrentPrescription = res;
+                    _statusMessage = $"Reçete taslağı güncellendi: {res.PrescriptionNumber}";
+                    await RunSafetyCheckAsync();
+                }
+                else
+                {
+                    _errorMessage = "Reçete taslağı güncellenemedi.";
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"Kaydetme hatası: {ex.Message}";
+        }
+        finally
+        {
+            _isSubmitting = false;
+        }
+    }
+
+    private async Task HandleSignClickAsync()
+    {
+        await RunSafetyCheckAsync();
+
+        if (_safetyResult is { HasWarnings: true } && _safetyResult.Warnings.Any(w => w.RequiresOverrideReason))
+        {
+            _overrideReason = string.Empty;
+            _showOverrideSignModal = true;
+            return;
+        }
+
+        await ExecuteSignAsync(null);
+    }
+
+    private async Task ConfirmSignWithOverrideAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_overrideReason) || _overrideReason.Trim().Length < 5)
+        {
+            return;
+        }
+
+        _showOverrideSignModal = false;
+        await ExecuteSignAsync(_overrideReason.Trim());
+    }
+
+    private async Task ExecuteSignAsync(string? overrideReason)
+    {
+        if (CurrentPrescription is null)
+        {
+            await SaveDraftAsync();
+            if (CurrentPrescription is null)
+            {
+                return;
+            }
+        }
+
+        _isSubmitting = true;
+        _errorMessage = null;
+        _statusMessage = null;
+
+        try
+        {
+            var res = await PharmacyApi.SignPrescriptionAsync(
+                CurrentPrescription.Id,
+                new SignPrescriptionRequest
+                {
+                    ExpectedVersion = CurrentPrescription.Version,
+                    ValidDays = 14,
+                    OverrideReason = overrideReason,
+                    AcknowledgedWarningCodes = _safetyResult?.Warnings.Select(w => w.WarningCode).ToList(),
+                });
+
+            if (res is not null)
+            {
+                CurrentPrescription = res;
+                _statusMessage = $"Reçete başarıyla imzalandı. Reçete No: {res.PrescriptionNumber}";
+            }
+            else
+            {
+                _errorMessage = "Reçete imzalanamadı (Güvenlik gerekçesi gerekebilir).";
+            }
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"İmzalama hatası: {ex.Message}";
+        }
+        finally
+        {
+            _isSubmitting = false;
+        }
+    }
+
+    private void OpenCancelModal()
+    {
+        _cancellationReason = string.Empty;
+        _showCancelModal = true;
+    }
+
+    private async Task ConfirmCancelAsync()
+    {
+        if (CurrentPrescription is null || string.IsNullOrWhiteSpace(_cancellationReason))
+        {
+            return;
+        }
+
+        _isSubmitting = true;
+        _errorMessage = null;
+        _statusMessage = null;
+
+        try
+        {
+            var res = await PharmacyApi.CancelPrescriptionAsync(
+                CurrentPrescription.Id,
+                new CancelPrescriptionRequest
+                {
+                    ExpectedVersion = CurrentPrescription.Version,
+                    Reason = _cancellationReason.Trim(),
+                });
+
+            if (res is not null)
+            {
+                CurrentPrescription = res;
+                _showCancelModal = false;
+                _statusMessage = $"Reçete iptal edildi: {res.PrescriptionNumber}";
+            }
+            else
+            {
+                _errorMessage = "Reçete iptal edilemedi.";
+            }
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"İptal hatası: {ex.Message}";
+        }
+        finally
+        {
+            _isSubmitting = false;
+        }
+    }
+
+    private bool ValidateInputs(out Guid encounterId, out Guid patientId, out Guid departmentId)
+    {
+        patientId = Guid.Empty;
+        departmentId = Guid.Empty;
+
+        if (!Guid.TryParse(_inputEncounterId, out encounterId))
+        {
+            _errorMessage = "Geçerli bir Karşılaşma Kimliği giriniz.";
+            return false;
+        }
+
+        if (!Guid.TryParse(_inputPatientId, out patientId))
+        {
+            _errorMessage = "Geçerli bir Hasta Kimliği giriniz.";
+            return false;
+        }
+
+        if (!Guid.TryParse(_inputDepartmentId, out departmentId))
+        {
+            _errorMessage = "Geçerli bir Bölüm Kimliği giriniz.";
+            return false;
+        }
+
+        return true;
+    }
+
+    private static string GetStatusDisplayText(string status) => status switch
+    {
+        "Draft" => "Taslak (Draft)",
+        "Signed" => "İmzalı (Signed)",
+        "PartiallyDispensed" => "Kısmen Karşılandı",
+        "Dispensed" => "Tamamı Karşılandı",
+        "Cancelled" => "İptal Edildi",
+        "Expired" => "Süresi Doldu",
+        "EnteredInError" => "Hatalı Giriş",
+        _ => status,
+    };
+
+    private static string GetStatusBadgeClass(string status) => status switch
+    {
+        "Draft" => "ui-badge--secondary",
+        "Signed" => "ui-badge--primary",
+        "PartiallyDispensed" => "ui-badge--warning",
+        "Dispensed" => "ui-badge--success",
+        "Cancelled" => "ui-badge--danger",
+        "Expired" => "ui-badge--muted",
+        "EnteredInError" => "ui-badge--danger",
+        _ => "ui-badge--secondary",
+    };
+
+    private sealed class DraftItemModel
+    {
+        public Guid MedicationCatalogItemId { get; set; }
+        public string MedicationCode { get; set; } = string.Empty;
+        public string BrandName { get; set; } = string.Empty;
+        public string GenericName { get; set; } = string.Empty;
+        public string Form { get; set; } = string.Empty;
+        public string Route { get; set; } = string.Empty;
+        public decimal Dose { get; set; } = 1;
+        public string DoseUnit { get; set; } = "tablet";
+        public string Frequency { get; set; } = "1x1";
+        public int DurationDays { get; set; } = 7;
+        public int Quantity { get; set; } = 1;
+        public string QuantityUnit { get; set; } = "kutu";
+        public string? Instructions { get; set; }
+    }
+}

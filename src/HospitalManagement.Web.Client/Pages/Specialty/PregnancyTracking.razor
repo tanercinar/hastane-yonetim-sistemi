@@ -1,0 +1,698 @@
+@page "/specialty/pregnancy"
+@using HospitalManagement.Contracts.Specialty
+@using HospitalManagement.Web.Client.Specialty
+@using Microsoft.AspNetCore.Authorization
+@attribute [Authorize]
+@inject ISpecialtyCareApiClient SpecialtyClient
+
+<PageTitle>Gebelik ve Antenatal Takip — Hastane Yönetim Sistemi</PageTitle>
+
+<div class="container-fluid p-4">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <div>
+            <h2 class="h4 mb-1 text-primary"><i class="bi bi-heart-pulse-fill me-2"></i>Gebelik ve Antenatal Takip Panosu</h2>
+            <p class="text-muted small mb-0">Obstetrik takip süreçleri, antenatal vizit kayıtları ve gebelik risk sınıflandırması</p>
+        </div>
+        <div>
+            <button class="btn btn-primary" @onclick="OpenNewEpisodeModal">
+                <i class="bi bi-plus-circle me-1"></i> Yeni Gebelik Takibi Başlat
+            </button>
+        </div>
+    </div>
+
+    <!-- Educational & Simulation Disclaimer Banner -->
+    <div class="alert alert-info d-flex align-items-center mb-4" role="alert">
+        <i class="bi bi-info-circle-fill fs-4 me-3"></i>
+        <div>
+            <strong>Klinik Simülasyon Bildirimi:</strong> Bu ekran eğitim ve simülasyon amaçlı gebelik takip modelidir.
+            Sistem otomatik klinik karar desteği veya tanı algoritması içermez; tüm veriler yetkili hekim ve ebe sorumluluğunda kaydedilir.
+        </div>
+    </div>
+
+    @if (!string.IsNullOrWhiteSpace(_errorMessage))
+    {
+        <div class="alert alert-danger alert-dismissible fade show" role="alert">
+            <i class="bi bi-exclamation-triangle-fill me-2"></i>@_errorMessage
+            <button type="button" class="btn-close" @onclick="() => _errorMessage = null"></button>
+        </div>
+    }
+
+    @if (!string.IsNullOrWhiteSpace(_successMessage))
+    {
+        <div class="alert alert-success alert-dismissible fade show" role="alert">
+            <i class="bi bi-check-circle-fill me-2"></i>@_successMessage
+            <button type="button" class="btn-close" @onclick="() => _successMessage = null"></button>
+        </div>
+    }
+
+    @if (_isLoading)
+    {
+        <div class="text-center py-5">
+            <div class="spinner-border text-primary" role="status">
+                <span class="visually-hidden">Yükleniyor...</span>
+            </div>
+            <p class="text-muted mt-2">Gebelik takip kayıtları yükleniyor...</p>
+        </div>
+    }
+    else
+    {
+        <div class="row">
+            <!-- Active Episodes List Column -->
+            <div class="col-lg-5 mb-4">
+                <div class="card border-0 shadow-sm h-100">
+                    <div class="card-header bg-light d-flex justify-content-between align-items-center">
+                        <h6 class="mb-0 fw-semibold text-secondary">
+                            <i class="bi bi-list-task me-1"></i> Aktif Takipler (@_activeEpisodes.Count)
+                        </h6>
+                        <button class="btn btn-sm btn-outline-secondary" @onclick="LoadActiveEpisodesAsync">
+                            <i class="bi bi-arrow-clockwise"></i>
+                        </button>
+                    </div>
+                    <div class="card-body p-0">
+                        @if (_activeEpisodes.Count == 0)
+                        {
+                            <div class="text-center py-5 text-muted">
+                                <i class="bi bi-calendar-x fs-1 d-block mb-2"></i>
+                                Aktif gebelik takip kaydı bulunmuyor.
+                            </div>
+                        }
+                        else
+                        {
+                            <div class="list-group list-group-flush">
+                                @foreach (var ep in _activeEpisodes)
+                                {
+                                    var isSelected = _selectedEpisode?.Id == ep.Id;
+                                    <button type="button"
+                                            class="list-group-item list-group-item-action p-3 @(isSelected ? "active" : "")"
+                                            @onclick="() => SelectEpisode(ep)">
+                                        <div class="d-flex w-100 justify-content-between align-items-start mb-1">
+                                            <span class="fw-bold @(isSelected ? "text-white" : "text-primary")">
+                                                @ep.EpisodeProtocolNumber
+                                            </span>
+                                            <span class="badge @GetRiskBadgeClass(ep.RiskCategory)">
+                                                @GetRiskCategoryTitle(ep.RiskCategory)
+                                            </span>
+                                        </div>
+                                        <div class="small mb-1 @(isSelected ? "text-white-50" : "text-muted")">
+                                            Obstetrik: G@(ep.Gravida) P@(ep.Para) A@(ep.Abortus) L@(ep.LivingChildren)
+                                            @if (!string.IsNullOrWhiteSpace(ep.BloodGroupAndRh))
+                                            {
+                                                <span> | Kan: @ep.BloodGroupAndRh</span>
+                                            }
+                                        </div>
+                                        <div class="small @(isSelected ? "text-white" : "text-dark")">
+                                            <i class="bi bi-calendar-event me-1"></i>
+                                            Tahmini Doğum: @ep.EstimatedDeliveryDateUtc.ToLocalTime().ToString("dd.MM.yyyy")
+                                            <span class="ms-2 badge @(isSelected ? "bg-light text-dark" : "bg-secondary")">
+                                                @ep.AntenatalVisits.Count vizit
+                                            </span>
+                                        </div>
+                                    </button>
+                                }
+                            </div>
+                        }
+                    </div>
+                </div>
+            </div>
+
+            <!-- Selected Episode Details Column -->
+            <div class="col-lg-7 mb-4">
+                @if (_selectedEpisode is null)
+                {
+                    <div class="card border-0 shadow-sm h-100 d-flex justify-content-center align-items-center py-5 text-muted">
+                        <i class="bi bi-clipboard2-pulse fs-1 mb-2"></i>
+                        <p>Detayları ve vizit geçmişini görüntülemek için soldan bir gebelik takibi seçin.</p>
+                    </div>
+                }
+                else
+                {
+                    <div class="card border-0 shadow-sm mb-4">
+                        <div class="card-header bg-light d-flex justify-content-between align-items-center">
+                            <div>
+                                <h5 class="card-title mb-0 text-primary">
+                                    @_selectedEpisode.EpisodeProtocolNumber
+                                </h5>
+                                <span class="badge @GetRiskBadgeClass(_selectedEpisode.RiskCategory) mt-1">
+                                    @GetRiskCategoryTitle(_selectedEpisode.RiskCategory)
+                                </span>
+                            </div>
+                            <div class="btn-group">
+                                <button class="btn btn-sm btn-outline-primary" @onclick="OpenAddVisitModal">
+                                    <i class="bi bi-plus-lg me-1"></i> Vizit Ekle
+                                </button>
+                                <button class="btn btn-sm btn-outline-secondary" @onclick="OpenUpdateRiskModal">
+                                    <i class="bi bi-shield-check me-1"></i> Risk Güncelle
+                                </button>
+                                <button class="btn btn-sm btn-outline-danger" @onclick="OpenCompleteModal">
+                                    <i class="bi bi-check2-circle me-1"></i> Sonlandır
+                                </button>
+                            </div>
+                        </div>
+                        <div class="card-body">
+                            <div class="row g-3 mb-3">
+                                <div class="col-sm-4">
+                                    <div class="p-2 bg-light rounded text-center">
+                                        <small class="text-muted d-block">Son Adet Tarihi (SAT)</small>
+                                        <span class="fw-semibold">@_selectedEpisode.LastMenstrualPeriodUtc.ToLocalTime().ToString("dd.MM.yyyy")</span>
+                                    </div>
+                                </div>
+                                <div class="col-sm-4">
+                                    <div class="p-2 bg-light rounded text-center">
+                                        <small class="text-muted d-block">Tahmini Doğum (TDT)</small>
+                                        <span class="fw-semibold text-primary">@_selectedEpisode.EstimatedDeliveryDateUtc.ToLocalTime().ToString("dd.MM.yyyy")</span>
+                                    </div>
+                                </div>
+                                <div class="col-sm-4">
+                                    <div class="p-2 bg-light rounded text-center">
+                                        <small class="text-muted d-block">Obstetrik Öykü</small>
+                                        <span class="fw-semibold">G@(_selectedEpisode.Gravida) P@(_selectedEpisode.Para) A@(_selectedEpisode.Abortus) L@(_selectedEpisode.LivingChildren)</span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            @if (!string.IsNullOrWhiteSpace(_selectedEpisode.RiskFactorsNotes))
+                            {
+                                <div class="alert alert-warning py-2 px-3 small mb-3">
+                                    <strong>Risk / Klinik Not:</strong> @_selectedEpisode.RiskFactorsNotes
+                                </div>
+                            }
+
+                            <!-- Antenatal Visits Timeline -->
+                            <h6 class="fw-bold border-bottom pb-2 mb-3">
+                                <i class="bi bi-clock-history me-1"></i> Antenatal Vizit Geçmişi (@_selectedEpisode.AntenatalVisits.Count)
+                            </h6>
+
+                            @if (_selectedEpisode.AntenatalVisits.Count == 0)
+                            {
+                                <p class="text-muted small text-center py-3">Bu gebelik için henüz kaydedilmiş bir antenatal vizit bulunmuyor.</p>
+                            }
+                            else
+                            {
+                                <div class="table-responsive">
+                                    <table class="table table-hover table-sm align-middle small">
+                                        <thead class="table-light">
+                                            <tr>
+                                                <th>Tarih</th>
+                                                <th>Hafta</th>
+                                                <th>Kilo / TA</th>
+                                                <th>FKA / Prezantasyon</th>
+                                                <th>Ödem / İdrar</th>
+                                                <th>Klinik Not</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            @foreach (var v in _selectedEpisode.AntenatalVisits.OrderByDescending(v => v.VisitDateUtc))
+                                            {
+                                                <tr>
+                                                    <td class="fw-semibold">@v.VisitDateUtc.ToLocalTime().ToString("dd.MM.yyyy")</td>
+                                                    <td>
+                                                        <span class="badge bg-info text-dark">@(v.GestationalAgeWeeks)+@(v.GestationalAgeDays) hf</span>
+                                                    </td>
+                                                    <td>
+                                                        <div>@(v.MaternalWeightKg.HasValue ? $"{v.MaternalWeightKg} kg" : "-")</div>
+                                                        <div class="text-muted">@(v.SystolicBpMmHg.HasValue && v.DiastolicBpMmHg.HasValue ? $"{v.SystolicBpMmHg}/{v.DiastolicBpMmHg} mmHg" : "-")</div>
+                                                    </td>
+                                                    <td>
+                                                        <div>@(v.FetalHeartRateBpm.HasValue ? $"{v.FetalHeartRateBpm} bpm" : "-")</div>
+                                                        <div class="text-muted">@v.FetalPresentation</div>
+                                                    </td>
+                                                    <td>
+                                                        <div>Ödem: @v.EdemaLevel</div>
+                                                        <div class="text-muted">
+                                                            P: @(v.UrineProteinPresent ? "+" : "-"), G: @(v.UrineGlucosePresent ? "+" : "-")
+                                                        </div>
+                                                    </td>
+                                                    <td>
+                                                        <span title="@v.ClinicalNotes">
+                                                            @(string.IsNullOrWhiteSpace(v.ClinicalNotes) ? "-" : (v.ClinicalNotes.Length > 25 ? v.ClinicalNotes[..25] + "..." : v.ClinicalNotes))
+                                                        </span>
+                                                    </td>
+                                                </tr>
+                                            }
+                                        </tbody>
+                                    </table>
+                                </div>
+                            }
+                        </div>
+                    </div>
+                }
+            </div>
+        </div>
+    }
+</div>
+
+<!-- Modal: Yeni Gebelik Takibi -->
+@if (_showNewEpisodeModal)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header bg-primary text-white">
+                    <h5 class="modal-title"><i class="bi bi-plus-circle me-2"></i>Yeni Gebelik Takibi Başlat</h5>
+                    <button type="button" class="btn-close btn-close-white" @onclick="() => _showNewEpisodeModal = false"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <label class="form-label fw-semibold">Hasta ID *</label>
+                            <input type="text" class="form-control" placeholder="00000000-0000-0000-0000-000000000201" @bind="_newEpisodeModel.PatientId" />
+                            <small class="text-muted">Kayıtlı anne hasta ID'si giriniz.</small>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label fw-semibold">Başlangıç Karşılaşma ID *</label>
+                            <input type="text" class="form-control" @bind="_newEpisodeModel.OpeningEncounterId" />
+                            <small class="text-muted">Aynı hastaya ait, randevuya bağlı encounter ID'si.</small>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label fw-semibold">Kan Grubu & Rh</label>
+                            <select class="form-select" @bind="_newEpisodeModel.BloodGroupAndRh">
+                                <option value="">Belirtilmedi</option>
+                                <option value="A Rh(+)">A Rh(+)</option>
+                                <option value="A Rh(-)">A Rh(-)</option>
+                                <option value="B Rh(+)">B Rh(+)</option>
+                                <option value="B Rh(-)">B Rh(-)</option>
+                                <option value="AB Rh(+)">AB Rh(+)</option>
+                                <option value="AB Rh(-)">AB Rh(-)</option>
+                                <option value="0 Rh(+)">0 Rh(+)</option>
+                                <option value="0 Rh(-)">0 Rh(-)</option>
+                            </select>
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label fw-semibold">Gravida (G)</label>
+                            <input type="number" class="form-control" min="1" @bind="_newEpisodeModel.Gravida" />
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label fw-semibold">Parite (P)</label>
+                            <input type="number" class="form-control" min="0" @bind="_newEpisodeModel.Para" />
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label fw-semibold">Abortus (A)</label>
+                            <input type="number" class="form-control" min="0" @bind="_newEpisodeModel.Abortus" />
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label fw-semibold">Yaşayan (L)</label>
+                            <input type="number" class="form-control" min="0" @bind="_newEpisodeModel.LivingChildren" />
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label fw-semibold">Son Adet Tarihi (SAT) *</label>
+                            <input type="date" class="form-control" @bind="_newEpisodeModel.LastMenstrualPeriodUtc" />
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label fw-semibold">Risk Kategorisi</label>
+                            <select class="form-select" @bind="_newEpisodeModel.RiskCategory">
+                                <option value="LowRisk">Düşük Risk (Standart Takip)</option>
+                                <option value="HighRisk">Yüksek Risk</option>
+                                <option value="GestationalDiabetes">Gestasyonel Diyabet</option>
+                                <option value="Preeclampsia">Preeklampsi Riski</option>
+                                <option value="MultipleGestation">Çoğul Gebelik</option>
+                                <option value="OtherHighRisk">Diğer Yüksek Risk</option>
+                            </select>
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label fw-semibold">Risk Faktörleri / Anamnez Notu</label>
+                            <textarea class="form-control" rows="2" placeholder="Önceki sezaryen, preeklampsi öyküsü, kronik hastalık vb." @bind="_newEpisodeModel.RiskFactorsNotes"></textarea>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" @onclick="() => _showNewEpisodeModal = false">İptal</button>
+                    <button type="button" class="btn btn-primary" @onclick="SubmitNewEpisodeAsync">
+                        <i class="bi bi-check2"></i> Takibi Başlat
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+<!-- Modal: Yeni Antenatal Vizit -->
+@if (_showAddVisitModal && _selectedEpisode is not null)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header bg-primary text-white">
+                    <h5 class="modal-title"><i class="bi bi-calendar-plus me-2"></i>Antenatal Vizit Ekle (@_selectedEpisode.EpisodeProtocolNumber)</h5>
+                    <button type="button" class="btn-close btn-close-white" @onclick="() => _showAddVisitModal = false"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="row g-3">
+                        <div class="col-12">
+                            <label class="form-label fw-semibold">Karşılaşma ID *</label>
+                            <input type="text" class="form-control" @bind="_newVisitModel.EncounterId" />
+                            <small class="text-muted">Bu antenatal vizitin yapıldığı, randevuya bağlı encounter ID'si.</small>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label fw-semibold">Vizit Tarihi</label>
+                            <input type="date" class="form-control" @bind="_newVisitModel.VisitDateUtc" />
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label fw-semibold">Gebelik Haftası (0-45)</label>
+                            <input type="number" class="form-control" min="0" max="45" @bind="_newVisitModel.GestationalAgeWeeks" />
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label fw-semibold">Gebelik Günü (0-6)</label>
+                            <input type="number" class="form-control" min="0" max="6" @bind="_newVisitModel.GestationalAgeDays" />
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label fw-semibold">Anne Kilosu (kg)</label>
+                            <input type="number" step="0.1" class="form-control" @bind="_newVisitModel.MaternalWeightKg" />
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label fw-semibold">Sistolik KB (mmHg)</label>
+                            <input type="number" class="form-control" @bind="_newVisitModel.SystolicBpMmHg" />
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label fw-semibold">Diastolik KB (mmHg)</label>
+                            <input type="number" class="form-control" @bind="_newVisitModel.DiastolicBpMmHg" />
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label fw-semibold">Fundus Yüksekliği (cm)</label>
+                            <input type="number" step="0.5" class="form-control" @bind="_newVisitModel.FundalHeightCm" />
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label fw-semibold">Fetal Kalp Atımı (FHR/bpm)</label>
+                            <input type="number" class="form-control" placeholder="120-160" @bind="_newVisitModel.FetalHeartRateBpm" />
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label fw-semibold">Fetal Prezantasyon</label>
+                            <select class="form-select" @bind="_newVisitModel.FetalPresentation">
+                                <option value="Undetermined">Belirlenmedi / Erken</option>
+                                <option value="Cephalic">Baş (Sefalik)</option>
+                                <option value="Breech">Makat (Pelvik)</option>
+                                <option value="Transverse">Yan (Transvers)</option>
+                            </select>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label fw-semibold">Ödem Derecesi</label>
+                            <select class="form-select" @bind="_newVisitModel.EdemaLevel">
+                                <option value="None">Yok (0)</option>
+                                <option value="Mild">Hafif (+1)</option>
+                                <option value="Moderate">Orta (+2)</option>
+                                <option value="Severe">Şiddetli (+3 / Anazarka)</option>
+                            </select>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="form-check mt-3">
+                                <input class="form-check-input" type="checkbox" id="chkProtein" @bind="_newVisitModel.UrineProteinPresent" />
+                                <label class="form-check-label fw-semibold" for="chkProtein">
+                                    İdrarda Protein Pozitif (Proteinüri)
+                                </label>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="form-check mt-3">
+                                <input class="form-check-input" type="checkbox" id="chkGlucose" @bind="_newVisitModel.UrineGlucosePresent" />
+                                <label class="form-check-label fw-semibold" for="chkGlucose">
+                                    İdrarda Glikoz Pozitif (Glikozüri)
+                                </label>
+                            </div>
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label fw-semibold">Klinik Bulgular ve Öneriler</label>
+                            <textarea class="form-control" rows="2" placeholder="Fetal hareketler, USG bulguları, demir takviyesi vb." @bind="_newVisitModel.ClinicalNotes"></textarea>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" @onclick="() => _showAddVisitModal = false">İptal</button>
+                    <button type="button" class="btn btn-primary" @onclick="SubmitAddVisitAsync">
+                        <i class="bi bi-save"></i> Viziti Kaydet
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+<!-- Modal: Risk Güncelleme -->
+@if (_showUpdateRiskModal && _selectedEpisode is not null)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header bg-warning text-dark">
+                    <h5 class="modal-title"><i class="bi bi-shield-exclamation me-2"></i>Risk Düzeyini Güncelle</h5>
+                    <button type="button" class="btn-close" @onclick="() => _showUpdateRiskModal = false"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">Yeni Risk Kategorisi</label>
+                        <select class="form-select" @bind="_updateRiskModel.RiskCategory">
+                            <option value="LowRisk">Düşük Risk (Standart Takip)</option>
+                            <option value="HighRisk">Yüksek Risk</option>
+                            <option value="GestationalDiabetes">Gestasyonel Diyabet</option>
+                            <option value="Preeclampsia">Preeklampsi Riski</option>
+                            <option value="MultipleGestation">Çoğul Gebelik</option>
+                            <option value="OtherHighRisk">Diğer Yüksek Risk</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">Güncelleme Gerekçesi / Not</label>
+                        <textarea class="form-control" rows="3" placeholder="Örn: 28. haftada OGTT 50g yüksek çıktı, gestasyonel diyabet takibine alındı." @bind="_updateRiskModel.RiskFactorsNotes"></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" @onclick="() => _showUpdateRiskModal = false">İptal</button>
+                    <button type="button" class="btn btn-warning" @onclick="SubmitUpdateRiskAsync">
+                        <i class="bi bi-check2"></i> Güncelle
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+<!-- Modal: Takip Sonlandırma -->
+@if (_showCompleteModal && _selectedEpisode is not null)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header bg-danger text-white">
+                    <h5 class="modal-title"><i class="bi bi-check2-circle me-2"></i>Gebelik Takibini Sonlandır</h5>
+                    <button type="button" class="btn-close btn-close-white" @onclick="() => _showCompleteModal = false"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">Kapanış Sonucu</label>
+                        <select class="form-select" @bind="_completeOutcomeStatus">
+                            <option value="Delivered">Doğum Gerçekleşti (Delivered)</option>
+                            <option value="Terminated">Sonlandırıldı / Abortus (Terminated)</option>
+                            <option value="TransferredOut">Dış Merkeze Sevk (TransferredOut)</option>
+                        </select>
+                    </div>
+                    <p class="text-muted small">
+                        Gebelik takibi sonlandırıldığında statü kapanacak ve aktif listeden kaldırılacaktır.
+                    </p>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" @onclick="() => _showCompleteModal = false">Vazgeç</button>
+                    <button type="button" class="btn btn-danger" @onclick="SubmitCompleteAsync">
+                        <i class="bi bi-check-lg"></i> Sonlandır
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private List<PregnancyEpisodeResponse> _activeEpisodes = [];
+    private PregnancyEpisodeResponse? _selectedEpisode;
+    private bool _isLoading = true;
+    private string? _errorMessage;
+    private string? _successMessage;
+
+    // Modals
+    private bool _showNewEpisodeModal;
+    private bool _showAddVisitModal;
+    private bool _showUpdateRiskModal;
+    private bool _showCompleteModal;
+
+    private CreatePregnancyEpisodeRequest _newEpisodeModel = new();
+    private RecordAntenatalVisitRequest _newVisitModel = new();
+    private UpdatePregnancyRiskCategoryRequest _updateRiskModel = new();
+    private string _completeOutcomeStatus = "Delivered";
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadActiveEpisodesAsync();
+    }
+
+    private async Task LoadActiveEpisodesAsync()
+    {
+        _isLoading = true;
+        _errorMessage = null;
+        try
+        {
+            _activeEpisodes = await SpecialtyClient.GetActivePregnancyEpisodesAsync();
+            if (_selectedEpisode is not null)
+            {
+                _selectedEpisode = _activeEpisodes.FirstOrDefault(e => e.Id == _selectedEpisode.Id);
+            }
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"Kayıtlar yüklenirken hata oluştu: {ex.Message}";
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+    }
+
+    private void SelectEpisode(PregnancyEpisodeResponse ep)
+    {
+        _selectedEpisode = ep;
+    }
+
+    private void OpenNewEpisodeModal()
+    {
+        _newEpisodeModel = new CreatePregnancyEpisodeRequest
+        {
+            PatientId = Guid.Empty,
+            OpeningEncounterId = Guid.Empty,
+            Gravida = 1,
+            Para = 0,
+            Abortus = 0,
+            LivingChildren = 0,
+            LastMenstrualPeriodUtc = DateTime.UtcNow.Date.AddDays(-70),
+            RiskCategory = "LowRisk",
+        };
+        _showNewEpisodeModal = true;
+    }
+
+    private async Task SubmitNewEpisodeAsync()
+    {
+        _errorMessage = null;
+        try
+        {
+            var created = await SpecialtyClient.CreatePregnancyEpisodeAsync(_newEpisodeModel);
+            _successMessage = $"Yeni gebelik takibi başlatıldı ({created.EpisodeProtocolNumber}).";
+            _showNewEpisodeModal = false;
+            await LoadActiveEpisodesAsync();
+            _selectedEpisode = _activeEpisodes.FirstOrDefault(e => e.Id == created.Id);
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"Gebelik takibi oluşturulamadı: {ex.Message}";
+        }
+    }
+
+    private void OpenAddVisitModal()
+    {
+        if (_selectedEpisode is null) return;
+        _newVisitModel = new RecordAntenatalVisitRequest
+        {
+            EncounterId = Guid.Empty,
+            VisitDateUtc = DateTime.UtcNow.Date,
+            GestationalAgeWeeks = 12,
+            GestationalAgeDays = 0,
+            FetalPresentation = "Undetermined",
+            EdemaLevel = "None",
+        };
+        _showAddVisitModal = true;
+    }
+
+    private async Task SubmitAddVisitAsync()
+    {
+        if (_selectedEpisode is null) return;
+        _errorMessage = null;
+        try
+        {
+            var visit = await SpecialtyClient.RecordAntenatalVisitAsync(_selectedEpisode.Id, _newVisitModel);
+            _successMessage = $"Antenatal vizit kaydedildi ({_newVisitModel.GestationalAgeWeeks}+{_newVisitModel.GestationalAgeDays} hafta).";
+            _showAddVisitModal = false;
+            await RefreshSelectedEpisodeAsync();
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"Vizit kaydedilemedi: {ex.Message}";
+        }
+    }
+
+    private void OpenUpdateRiskModal()
+    {
+        if (_selectedEpisode is null) return;
+        _updateRiskModel = new UpdatePregnancyRiskCategoryRequest
+        {
+            RiskCategory = _selectedEpisode.RiskCategory,
+            RiskFactorsNotes = _selectedEpisode.RiskFactorsNotes,
+        };
+        _showUpdateRiskModal = true;
+    }
+
+    private async Task SubmitUpdateRiskAsync()
+    {
+        if (_selectedEpisode is null) return;
+        _errorMessage = null;
+        try
+        {
+            var updated = await SpecialtyClient.UpdatePregnancyRiskCategoryAsync(_selectedEpisode.Id, _updateRiskModel);
+            _successMessage = $"Risk kategorisi güncellendi ({updated.RiskCategory}).";
+            _showUpdateRiskModal = false;
+            await RefreshSelectedEpisodeAsync();
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"Risk güncellenemedi: {ex.Message}";
+        }
+    }
+
+    private void OpenCompleteModal()
+    {
+        _completeOutcomeStatus = "Delivered";
+        _showCompleteModal = true;
+    }
+
+    private async Task SubmitCompleteAsync()
+    {
+        if (_selectedEpisode is null) return;
+        _errorMessage = null;
+        try
+        {
+            var updated = await SpecialtyClient.CompletePregnancyEpisodeAsync(_selectedEpisode.Id, new CompletePregnancyEpisodeRequest(_completeOutcomeStatus));
+            _successMessage = $"Gebelik takibi sonlandırıldı ({_completeOutcomeStatus}).";
+            _showCompleteModal = false;
+            _selectedEpisode = null;
+            await LoadActiveEpisodesAsync();
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"Takip sonlandırılamadı: {ex.Message}";
+        }
+    }
+
+    private async Task RefreshSelectedEpisodeAsync()
+    {
+        if (_selectedEpisode is null) return;
+        var fresh = await SpecialtyClient.GetPregnancyEpisodeByIdAsync(_selectedEpisode.Id);
+        if (fresh is not null)
+        {
+            _selectedEpisode = fresh;
+        }
+        await LoadActiveEpisodesAsync();
+    }
+
+    private static string GetRiskBadgeClass(string risk) => risk switch
+    {
+        "LowRisk" => "bg-success",
+        "HighRisk" => "bg-danger",
+        "GestationalDiabetes" => "bg-warning text-dark",
+        "Preeclampsia" => "bg-danger",
+        "MultipleGestation" => "bg-info text-dark",
+        _ => "bg-secondary",
+    };
+
+    private static string GetRiskCategoryTitle(string risk) => risk switch
+    {
+        "LowRisk" => "Düşük Risk",
+        "HighRisk" => "Yüksek Risk",
+        "GestationalDiabetes" => "Gestasyonel Diyabet",
+        "Preeclampsia" => "Preeklampsi",
+        "MultipleGestation" => "Çoğul Gebelik",
+        "OtherHighRisk" => "Diğer Yüksek Risk",
+        _ => risk,
+    };
+}

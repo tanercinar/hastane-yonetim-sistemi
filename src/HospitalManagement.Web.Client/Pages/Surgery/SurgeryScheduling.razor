@@ -1,0 +1,725 @@
+@page "/surgery/scheduling"
+@using HospitalManagement.Contracts.Surgery
+@using HospitalManagement.Web.Client.Surgery
+@inject ISurgeryApiClient SurgeryApi
+
+<div class="container-fluid py-4">
+    <!-- Header -->
+    <div class="d-flex flex-wrap justify-content-between align-items-center mb-4 gap-3">
+        <div>
+            <h2 class="fw-bold mb-1 text-dark">
+                <i class="bi bi-hospital-fill text-primary me-2"></i>Ameliyathane &amp; Cerrahi Planlama
+            </h2>
+            <p class="text-muted mb-0">Ameliyathane salon programı, cerrahi ekip ataması, pre-op kontrol listesi ve çakışma yönetimi.</p>
+        </div>
+        <div class="d-flex gap-2">
+            <button class="btn btn-outline-secondary" @onclick="LoadDataAsync" disabled="@_isLoading">
+                <i class="bi bi-arrow-clockwise me-1"></i>Yenile
+            </button>
+            <button class="btn btn-primary" @onclick="OpenNewBookingModal">
+                <i class="bi bi-plus-circle me-1"></i>Yeni Ameliyat Planla
+            </button>
+        </div>
+    </div>
+
+    <!-- Alert Messages -->
+    @if (!string.IsNullOrWhiteSpace(_errorMessage))
+    {
+        <div class="alert alert-danger alert-dismissible fade show" role="alert">
+            <i class="bi bi-exclamation-triangle-fill me-2"></i>@_errorMessage
+            <button type="button" class="btn-close" @onclick="() => _errorMessage = null"></button>
+        </div>
+    }
+    @if (!string.IsNullOrWhiteSpace(_successMessage))
+    {
+        <div class="alert alert-success alert-dismissible fade show" role="alert">
+            <i class="bi bi-check-circle-fill me-2"></i>@_successMessage
+            <button type="button" class="btn-close" @onclick="() => _successMessage = null"></button>
+        </div>
+    }
+
+    <!-- KPI Summary Row -->
+    <div class="row g-3 mb-4">
+        <div class="col-md-2 col-6">
+            <div class="card border-0 shadow-sm text-center py-3 bg-white">
+                <span class="text-muted small fw-bold text-uppercase">Toplam Ameliyat</span>
+                <h3 class="fw-bold mb-0 text-dark">@_bookings.Count</h3>
+            </div>
+        </div>
+        <div class="col-md-2 col-6">
+            <div class="card border-0 shadow-sm text-center py-3 bg-primary-subtle text-primary">
+                <span class="small fw-bold text-uppercase">Planlandı</span>
+                <h3 class="fw-bold mb-0">@_bookings.Count(b => b.Status == "Scheduled")</h3>
+            </div>
+        </div>
+        <div class="col-md-2 col-6">
+            <div class="card border-0 shadow-sm text-center py-3 bg-info-subtle text-info-emphasis">
+                <span class="small fw-bold text-uppercase">Pre-Op Hazır</span>
+                <h3 class="fw-bold mb-0">@_bookings.Count(b => b.Status == "PreOpCleared")</h3>
+            </div>
+        </div>
+        <div class="col-md-2 col-6">
+            <div class="card border-0 shadow-sm text-center py-3 bg-warning-subtle text-warning-emphasis">
+                <span class="small fw-bold text-uppercase">Devam Ediyor</span>
+                <h3 class="fw-bold mb-0">@_bookings.Count(b => b.Status == "InProgress")</h3>
+            </div>
+        </div>
+        <div class="col-md-2 col-6">
+            <div class="card border-0 shadow-sm text-center py-3 bg-success-subtle text-success">
+                <span class="small fw-bold text-uppercase">Tamamlandı</span>
+                <h3 class="fw-bold mb-0">@_bookings.Count(b => b.Status == "Completed")</h3>
+            </div>
+        </div>
+        <div class="col-md-2 col-6">
+            <div class="card border-0 shadow-sm text-center py-3 bg-secondary-subtle text-secondary">
+                <span class="small fw-bold text-uppercase">İptal / Ertelendi</span>
+                <h3 class="fw-bold mb-0">@_bookings.Count(b => b.Status is "Cancelled" or "Postponed")</h3>
+            </div>
+        </div>
+    </div>
+
+    <!-- Filters Bar -->
+    <div class="card border-0 shadow-sm mb-4">
+        <div class="card-body p-3">
+            <div class="row g-2 align-items-center">
+                <div class="col-md-4">
+                    <label class="form-label small text-muted mb-1">Ameliyathane Salonu</label>
+                    <select class="form-select form-select-sm" @bind="_selectedRoomId" @bind:after="ApplyFilter">
+                        <option value="">-- Tüm Salonlar --</option>
+                        @foreach (var room in _rooms)
+                        {
+                            <option value="@room.Id">@room.RoomCode - @room.RoomName</option>
+                        }
+                    </select>
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label small text-muted mb-1">Durum Filtresi</label>
+                    <select class="form-select form-select-sm" @bind="_selectedStatus" @bind:after="ApplyFilter">
+                        <option value="">-- Tüm Durumlar --</option>
+                        <option value="Scheduled">Planlandı</option>
+                        <option value="PreOpCleared">Pre-Op Hazır</option>
+                        <option value="InProgress">Devam Ediyor</option>
+                        <option value="Completed">Tamamlandı</option>
+                        <option value="Cancelled">İptal Edildi</option>
+                    </select>
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label small text-muted mb-1">Tarih</label>
+                    <input type="date" class="form-control form-control-sm" @bind="_selectedDate" @bind:after="ApplyFilter" />
+                </div>
+                <div class="col-md-2 d-flex align-items-end">
+                    <button class="btn btn-outline-secondary btn-sm w-100" @onclick="ClearFilters">
+                        <i class="bi bi-x-circle me-1"></i>Temizle
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Bookings Table -->
+    <div class="card border-0 shadow-sm">
+        <div class="card-header bg-white py-3">
+            <h5 class="fw-bold mb-0 text-dark">
+                <i class="bi bi-calendar2-week me-2 text-primary"></i>Planlanmış Cerrahi Randevuları
+            </h5>
+        </div>
+        <div class="card-body p-0">
+            @if (_isLoading)
+            {
+                <div class="text-center py-5">
+                    <div class="spinner-border text-primary" role="status">
+                        <span class="visually-hidden">Yükleniyor...</span>
+                    </div>
+                </div>
+            }
+            else if (_filteredBookings.Count == 0)
+            {
+                <div class="text-center py-5 text-muted">
+                    <i class="bi bi-calendar-x fs-2 d-block mb-2"></i>
+                    Belirtilen kriterlerde planlanmış bir ameliyat randevusu bulunamadı.
+                </div>
+            }
+            else
+            {
+                <div class="table-responsive">
+                    <table class="table table-hover align-middle mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Protokol No</th>
+                                <th>Salon</th>
+                                <th>Zaman Aralığı</th>
+                                <th>İşlem &amp; Bölüm</th>
+                                <th>Aciliyet</th>
+                                <th>Cerrahi Ekip</th>
+                                <th>Pre-Op Durumu</th>
+                                <th>Durum</th>
+                                <th class="text-end">İşlemler</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var b in _filteredBookings)
+                            {
+                                var room = _rooms.FirstOrDefault(r => r.Id == b.OperatingRoomId);
+                                <tr>
+                                    <td class="font-monospace fw-bold small">@b.BookingProtocolNumber</td>
+                                    <td>
+                                        <span class="badge bg-light text-dark border">
+                                            <i class="bi bi-door-closed me-1"></i>@(room?.RoomCode ?? "Bilinmiyor")
+                                        </span>
+                                    </td>
+                                    <td>
+                                        <div class="fw-semibold">@b.ScheduledStartTimeUtc.ToLocalTime().ToString("t") - @b.ScheduledEndTimeUtc.ToLocalTime().ToString("t")</div>
+                                        <small class="text-muted">@b.ScheduledStartTimeUtc.ToLocalTime().ToString("d")</small>
+                                    </td>
+                                    <td>
+                                        <div class="fw-bold text-dark">@b.ProcedureName</div>
+                                        <small class="text-muted">@b.DepartmentName | Kod: @b.ProcedureCode</small>
+                                    </td>
+                                    <td>@GetUrgencyBadge(b.Urgency)</td>
+                                    <td class="small">
+                                        <div><i class="bi bi-person-badge me-1 text-primary"></i><strong>Cerrah:</strong> @b.LeadSurgeonDoctorId.ToString().Substring(0, 8)...</div>
+                                        <div class="text-muted"><i class="bi bi-heart-pulse me-1 text-danger"></i><strong>Anestezi:</strong> @b.AnesthesiologistDoctorId.ToString().Substring(0, 8)...</div>
+                                    </td>
+                                    <td>
+                                        @if (b.PreOpChecklist?.IsFullyCleared == true)
+                                        {
+                                            <span class="badge bg-success-subtle text-success border border-success">
+                                                <i class="bi bi-check-all me-1"></i>Onaylandı (6/6)
+                                            </span>
+                                        }
+                                        else
+                                        {
+                                            <span class="badge bg-warning-subtle text-warning-emphasis border border-warning">
+                                                <i class="bi bi-clock-history me-1"></i>Bekleniyor
+                                            </span>
+                                        }
+                                    </td>
+                                    <td>@GetStatusBadge(b.Status)</td>
+                                    <td class="text-end">
+                                        <div class="btn-group btn-group-sm">
+                                            <a class="btn btn-outline-info" href="surgery/perioperative/@b.Id" title="Perioperatif Ameliyat &amp; Anestezi Kaydı">
+                                                <i class="bi bi-journal-medical"></i> Peri-Op
+                                            </a>
+                                            @if (b.Status is "Scheduled" or "PreOpCleared")
+                                            {
+                                                <button class="btn btn-outline-success" @onclick="() => OpenPreOpModal(b)" title="Pre-Op Kontrol Listesi">
+                                                    <i class="bi bi-card-checklist"></i> Pre-Op
+                                                </button>
+                                                <button class="btn btn-outline-primary" @onclick="() => OpenRescheduleModal(b)" title="Yeniden Planla">
+                                                    <i class="bi bi-clock"></i>
+                                                </button>
+                                                <button class="btn btn-outline-danger" @onclick="() => OpenCancelModal(b)" title="İptal Et">
+                                                    <i class="bi bi-x-circle"></i>
+                                                </button>
+                                            }
+                                        </div>
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </div>
+    </div>
+</div>
+
+<!-- Modal: Yeni Ameliyat Planla -->
+@if (_showNewBookingModal)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal-dialog modal-lg modal-dialog-centered">
+            <div class="modal-content border-0 shadow">
+                <div class="modal-header bg-primary text-white">
+                    <h5 class="modal-title"><i class="bi bi-calendar-plus me-2"></i>Yeni Ameliyat Planla</h5>
+                    <button type="button" class="btn-close btn-close-white" @onclick="() => _showNewBookingModal = false"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <label class="form-label fw-bold">Hasta ID <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control" @bind="_newBookingRequest.PatientId" placeholder="Örn: GUID" />
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label fw-bold">Ameliyathane Salonu <span class="text-danger">*</span></label>
+                            <select class="form-select" @bind="_newBookingRequest.OperatingRoomId">
+                                @foreach (var room in _rooms)
+                                {
+                                    <option value="@room.Id">@room.RoomCode - @room.RoomName</option>
+                                }
+                            </select>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label fw-bold">Cerrahi Bölüm / Anabilim Dalı <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control" @bind="_newBookingRequest.DepartmentName" placeholder="Örn: Genel Cerrahi, Kalp Damar Cerrahisi" />
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label fw-bold">Aciliyet</label>
+                            <select class="form-select" @bind="_newBookingRequest.Urgency">
+                                <option value="Elective">Elektif (Planlı)</option>
+                                <option value="Expedited">Öncelikli (Expedited)</option>
+                                <option value="Emergency">Acil (Emergency)</option>
+                            </select>
+                        </div>
+                        <div class="col-md-8">
+                            <label class="form-label fw-bold">İşlem / Ameliyat Adı <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control" @bind="_newBookingRequest.ProcedureName" placeholder="Örn: Laparoskopik Kolesistektomi" />
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label fw-bold">İşlem Kodu <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control font-monospace" @bind="_newBookingRequest.ProcedureCode" placeholder="Örn: DEMO-PRC-CHOLE" />
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label fw-bold">Sorumlu Cerrah Hekim ID <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control" @bind="_newBookingRequest.LeadSurgeonDoctorId" />
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label fw-bold">Anestezi Hekimi ID <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control" @bind="_newBookingRequest.AnesthesiologistDoctorId" />
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label fw-bold">Başlangıç Zamanı (UTC) <span class="text-danger">*</span></label>
+                            <input type="datetime-local" class="form-control" @bind="_scheduledStartLocal" />
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label fw-bold">Bitiş Zamanı (UTC) <span class="text-danger">*</span></label>
+                            <input type="datetime-local" class="form-control" @bind="_scheduledEndLocal" />
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label">Klinik Notlar / Ekipman Talebi</label>
+                            <textarea class="form-control" rows="2" @bind="_newBookingRequest.ClinicalNotes" placeholder="Özel laparoskopik set, skopi cihazı hazır edilsin..."></textarea>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer bg-light">
+                    <button type="button" class="btn btn-secondary" @onclick="() => _showNewBookingModal = false">Vazgeç</button>
+                    <button type="button" class="btn btn-primary" @onclick="SubmitNewBookingAsync" disabled="@_isSubmitting">
+                        @if (_isSubmitting)
+                        {
+                            <span class="spinner-border spinner-border-sm me-1"></span>
+                        }
+                        <i class="bi bi-check2-circle me-1"></i>Ameliyatı Planla
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+<!-- Modal: Pre-Op Kontrol Listesi -->
+@if (_showPreOpModal && _selectedBooking != null)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content border-0 shadow">
+                <div class="modal-header bg-success text-white">
+                    <h5 class="modal-title"><i class="bi bi-card-checklist me-2"></i>Pre-Op Kontrol Listesi (Checklist)</h5>
+                    <button type="button" class="btn-close btn-close-white" @onclick="() => _showPreOpModal = false"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="alert alert-info py-2 small mb-3">
+                        <strong>Protokol:</strong> @_selectedBooking.BookingProtocolNumber | <strong>İşlem:</strong> @_selectedBooking.ProcedureName
+                    </div>
+                    <div class="form-check form-switch mb-2">
+                        <input class="form-check-input" type="checkbox" id="chkConsent" @bind="_preOpRequest.ConsentSigned">
+                        <label class="form-check-label fw-semibold" for="chkConsent">1. Bilgilendirilmiş Hasta Onamı Alındı</label>
+                    </div>
+                    <div class="form-check form-switch mb-2">
+                        <input class="form-check-input" type="checkbox" id="chkAnesthesia" @bind="_preOpRequest.AnesthesiaClearance">
+                        <label class="form-check-label fw-semibold" for="chkAnesthesia">2. Anestezi Pre-Op Uygunluk Viziti Tamamlandı</label>
+                    </div>
+                    <div class="form-check form-switch mb-2">
+                        <input class="form-check-input" type="checkbox" id="chkNpo" @bind="_preOpRequest.NpoConfirmed">
+                        <label class="form-check-label fw-semibold" for="chkNpo">3. Açlık (NPO) Süresi Teyit Edildi (en az 8 saat)</label>
+                    </div>
+                    <div class="form-check form-switch mb-2">
+                        <input class="form-check-input" type="checkbox" id="chkBlood" @bind="_preOpRequest.BloodProductsReserved">
+                        <label class="form-check-label fw-semibold" for="chkBlood">4. Kan &amp; Rezerve Ürün Hazırlığı Teyit Edildi</label>
+                    </div>
+                    <div class="form-check form-switch mb-2">
+                        <input class="form-check-input" type="checkbox" id="chkSite" @bind="_preOpRequest.SiteMarked">
+                        <label class="form-check-label fw-semibold" for="chkSite">5. Cerrahi Alan İşaretlemesi Yapıldı</label>
+                    </div>
+                    <div class="form-check form-switch mb-3">
+                        <input class="form-check-input" type="checkbox" id="chkAllergy" @bind="_preOpRequest.AllergyChecked">
+                        <label class="form-check-label fw-semibold" for="chkAllergy">6. İlaç &amp; Lateks Alerjisi Kontrol Edildi</label>
+                    </div>
+                    <div class="mb-2">
+                        <label class="form-label small fw-bold">Pre-Op Hemşire / Hekim Notu</label>
+                        <input type="text" class="form-control form-control-sm" @bind="_preOpRequest.Notes" placeholder="Pre-op vital değerleri stabil..." />
+                    </div>
+                </div>
+                <div class="modal-footer bg-light">
+                    <button type="button" class="btn btn-secondary" @onclick="() => _showPreOpModal = false">Vazgeç</button>
+                    <button type="button" class="btn btn-success" @onclick="SubmitPreOpChecklistAsync" disabled="@_isSubmitting">
+                        @if (_isSubmitting)
+                        {
+                            <span class="spinner-border spinner-border-sm me-1"></span>
+                        }
+                        Kontrol Listesini Kaydet
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+<!-- Modal: Yeniden Planla (Reschedule) -->
+@if (_showRescheduleModal && _selectedBooking != null)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content border-0 shadow">
+                <div class="modal-header bg-primary text-white">
+                    <h5 class="modal-title"><i class="bi bi-clock-history me-2"></i>Ameliyatı Yeniden Planla</h5>
+                    <button type="button" class="btn-close btn-close-white" @onclick="() => _showRescheduleModal = false"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">Ameliyathane Salonu</label>
+                        <select class="form-select" @bind="_rescheduleRequest.OperatingRoomId">
+                            @foreach (var room in _rooms)
+                            {
+                                <option value="@room.Id">@room.RoomCode - @room.RoomName</option>
+                            }
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">Yeni Başlangıç Zamanı</label>
+                        <input type="datetime-local" class="form-control" @bind="_rescheduleStartLocal" />
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">Yeni Bitiş Zamanı</label>
+                        <input type="datetime-local" class="form-control" @bind="_rescheduleEndLocal" />
+                    </div>
+                </div>
+                <div class="modal-footer bg-light">
+                    <button type="button" class="btn btn-secondary" @onclick="() => _showRescheduleModal = false">Vazgeç</button>
+                    <button type="button" class="btn btn-primary" @onclick="SubmitRescheduleAsync" disabled="@_isSubmitting">
+                        Kaydet &amp; Çakışma Kontrolü
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+<!-- Modal: İptal Et -->
+@if (_showCancelModal && _selectedBooking != null)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content border-0 shadow">
+                <div class="modal-header bg-danger text-white">
+                    <h5 class="modal-title"><i class="bi bi-x-circle me-2"></i>Ameliyat Randevusunu İptal Et</h5>
+                    <button type="button" class="btn-close btn-close-white" @onclick="() => _showCancelModal = false"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">İptal Gerekçesi <span class="text-danger">*</span></label>
+                        <textarea class="form-control" rows="3" @bind="_cancelRequest.Reason" placeholder="Hasta klinik durumu elvermedi / hasta isteği..."></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer bg-light">
+                    <button type="button" class="btn btn-secondary" @onclick="() => _showCancelModal = false">Vazgeç</button>
+                    <button type="button" class="btn btn-danger" @onclick="SubmitCancelAsync" disabled="@_isSubmitting">İptal Et</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private bool _isLoading = true;
+    private bool _isSubmitting;
+    private string? _errorMessage;
+    private string? _successMessage;
+
+    private List<OperatingRoomResponse> _rooms = [];
+    private List<SurgeryBookingResponse> _bookings = [];
+    private List<SurgeryBookingResponse> _filteredBookings = [];
+
+    private Guid? _selectedRoomId;
+    private string? _selectedStatus;
+    private DateOnly? _selectedDate;
+
+    private bool _showNewBookingModal;
+    private bool _showPreOpModal;
+    private bool _showRescheduleModal;
+    private bool _showCancelModal;
+    private SurgeryBookingResponse? _selectedBooking;
+
+    private CreateSurgeryBookingRequest _newBookingRequest = new();
+    private DateTime _scheduledStartLocal = DateTime.Today.AddHours(9);
+    private DateTime _scheduledEndLocal = DateTime.Today.AddHours(11);
+
+    private RecordPreOpChecklistRequest _preOpRequest = new();
+    private RescheduleSurgeryBookingRequest _rescheduleRequest = new();
+    private DateTime _rescheduleStartLocal;
+    private DateTime _rescheduleEndLocal;
+
+    private CancelSurgeryBookingRequest _cancelRequest = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadDataAsync();
+    }
+
+    private async Task LoadDataAsync()
+    {
+        _isLoading = true;
+        _errorMessage = null;
+        try
+        {
+            _rooms = await SurgeryApi.GetOperatingRoomsAsync();
+            _bookings = await SurgeryApi.GetBookingsAsync();
+            ApplyFilter();
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"Veriler yüklenirken hata: {ex.Message}";
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+    }
+
+    private void ApplyFilter()
+    {
+        var list = _bookings.AsEnumerable();
+
+        if (_selectedRoomId.HasValue && _selectedRoomId.Value != Guid.Empty)
+        {
+            list = list.Where(b => b.OperatingRoomId == _selectedRoomId.Value);
+        }
+
+        if (!string.IsNullOrWhiteSpace(_selectedStatus))
+        {
+            list = list.Where(b => b.Status == _selectedStatus);
+        }
+
+        if (_selectedDate.HasValue)
+        {
+            list = list.Where(b => DateOnly.FromDateTime(b.ScheduledStartTimeUtc.ToLocalTime()) == _selectedDate.Value);
+        }
+
+        _filteredBookings = list.OrderBy(b => b.ScheduledStartTimeUtc).ToList();
+    }
+
+    private void ClearFilters()
+    {
+        _selectedRoomId = null;
+        _selectedStatus = null;
+        _selectedDate = null;
+        ApplyFilter();
+    }
+
+    private void OpenNewBookingModal()
+    {
+        var defaultRoomId = _rooms.FirstOrDefault()?.Id ?? Guid.Empty;
+        _scheduledStartLocal = DateTime.Now.Date.AddDays(1).AddHours(9);
+        _scheduledEndLocal = DateTime.Now.Date.AddDays(1).AddHours(11);
+
+        _newBookingRequest = new CreateSurgeryBookingRequest
+        {
+            PatientId = Guid.Parse("00000000-0000-0000-0000-000000000121"),
+            DepartmentId = Guid.Parse("30000000-0000-0000-0000-000000000009"),
+            DepartmentName = "DEMO Genel Cerrahi Bölümü",
+            ProcedureName = "Laparoskopik Kolesistektomi",
+            ProcedureCode = "DEMO-PRC-CHOLE",
+            Urgency = "Elective",
+            OperatingRoomId = defaultRoomId,
+            LeadSurgeonDoctorId = Guid.Parse("00000000-0000-0000-0000-000000000102"),
+            AnesthesiologistDoctorId = Guid.Parse("00000000-0000-0000-0000-000000000111"),
+            ClinicalNotes = "Pre-op USG ve tetkikler hazır.",
+        };
+
+        _showNewBookingModal = true;
+    }
+
+    private async Task SubmitNewBookingAsync()
+    {
+        _isSubmitting = true;
+        _errorMessage = null;
+        try
+        {
+            _newBookingRequest.ScheduledStartTimeUtc = _scheduledStartLocal.ToUniversalTime();
+            _newBookingRequest.ScheduledEndTimeUtc = _scheduledEndLocal.ToUniversalTime();
+
+            var result = await SurgeryApi.CreateBookingAsync(_newBookingRequest);
+            if (result != null)
+            {
+                _successMessage = $"Ameliyat başarıyla planlandı ({result.BookingProtocolNumber}).";
+                _showNewBookingModal = false;
+                await LoadDataAsync();
+            }
+            else
+            {
+                _errorMessage = "Ameliyat planlanamadı. Çakışan oda veya cerrahi ekip randevusu olabilir.";
+            }
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"Hata: {ex.Message}";
+        }
+        finally
+        {
+            _isSubmitting = false;
+        }
+    }
+
+    private void OpenPreOpModal(SurgeryBookingResponse booking)
+    {
+        _selectedBooking = booking;
+        _preOpRequest = new RecordPreOpChecklistRequest
+        {
+            ConsentSigned = booking.PreOpChecklist?.ConsentSigned ?? true,
+            AnesthesiaClearance = booking.PreOpChecklist?.AnesthesiaClearance ?? true,
+            NpoConfirmed = booking.PreOpChecklist?.NpoConfirmed ?? true,
+            BloodProductsReserved = booking.PreOpChecklist?.BloodProductsReserved ?? true,
+            SiteMarked = booking.PreOpChecklist?.SiteMarked ?? true,
+            AllergyChecked = booking.PreOpChecklist?.AllergyChecked ?? true,
+            Notes = booking.PreOpChecklist?.Notes ?? "Tüm pre-op kontroller tamamlandı.",
+        };
+        _showPreOpModal = true;
+    }
+
+    private async Task SubmitPreOpChecklistAsync()
+    {
+        if (_selectedBooking == null) return;
+
+        _isSubmitting = true;
+        _errorMessage = null;
+        try
+        {
+            var res = await SurgeryApi.RecordPreOpChecklistAsync(_selectedBooking.Id, _preOpRequest);
+            if (res != null)
+            {
+                _successMessage = "Pre-Op kontrol listesi başarıyla kaydedildi.";
+                _showPreOpModal = false;
+                await LoadDataAsync();
+            }
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"Kontrol listesi kaydetme hatası: {ex.Message}";
+        }
+        finally
+        {
+            _isSubmitting = false;
+        }
+    }
+
+    private void OpenRescheduleModal(SurgeryBookingResponse booking)
+    {
+        _selectedBooking = booking;
+        _rescheduleRequest = new RescheduleSurgeryBookingRequest
+        {
+            OperatingRoomId = booking.OperatingRoomId,
+        };
+        _rescheduleStartLocal = booking.ScheduledStartTimeUtc.ToLocalTime().AddHours(2);
+        _rescheduleEndLocal = booking.ScheduledEndTimeUtc.ToLocalTime().AddHours(2);
+        _showRescheduleModal = true;
+    }
+
+    private async Task SubmitRescheduleAsync()
+    {
+        if (_selectedBooking == null) return;
+
+        _isSubmitting = true;
+        _errorMessage = null;
+        try
+        {
+            _rescheduleRequest.ScheduledStartTimeUtc = _rescheduleStartLocal.ToUniversalTime();
+            _rescheduleRequest.ScheduledEndTimeUtc = _rescheduleEndLocal.ToUniversalTime();
+
+            var res = await SurgeryApi.RescheduleBookingAsync(_selectedBooking.Id, _rescheduleRequest);
+            if (res != null)
+            {
+                _successMessage = "Ameliyat saati/salonu başarıyla güncellendi.";
+                _showRescheduleModal = false;
+                await LoadDataAsync();
+            }
+            else
+            {
+                _errorMessage = "Yeniden planlama başarısız. Çakışma kontrolünü kontrol edin.";
+            }
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"Yeniden planlama hatası: {ex.Message}";
+        }
+        finally
+        {
+            _isSubmitting = false;
+        }
+    }
+
+    private void OpenCancelModal(SurgeryBookingResponse booking)
+    {
+        _selectedBooking = booking;
+        _cancelRequest = new CancelSurgeryBookingRequest("Hasta operasyonu kabul etmedi / klinik gerek kalmadı.");
+        _showCancelModal = true;
+    }
+
+    private async Task SubmitCancelAsync()
+    {
+        if (_selectedBooking == null) return;
+
+        _isSubmitting = true;
+        _errorMessage = null;
+        try
+        {
+            var res = await SurgeryApi.CancelBookingAsync(_selectedBooking.Id, _cancelRequest);
+            if (res != null)
+            {
+                _successMessage = "Ameliyat randevusu iptal edildi.";
+                _showCancelModal = false;
+                await LoadDataAsync();
+            }
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"İptal hatası: {ex.Message}";
+        }
+        finally
+        {
+            _isSubmitting = false;
+        }
+    }
+
+    private static RenderFragment GetUrgencyBadge(string urgency) => builder =>
+    {
+        var (css, label) = urgency switch
+        {
+            "Emergency" => ("bg-danger text-white", "🔴 Acil (Emergency)"),
+            "Expedited" => ("bg-warning text-dark", "🟡 Öncelikli (Expedited)"),
+            _ => ("bg-info-subtle text-info-emphasis border", "🟢 Elektif"),
+        };
+
+        builder.OpenElement(0, "span");
+        builder.AddAttribute(1, "class", $"badge {css}");
+        builder.AddContent(2, label);
+        builder.CloseElement();
+    };
+
+    private static RenderFragment GetStatusBadge(string status) => builder =>
+    {
+        var (css, label) = status switch
+        {
+            "Scheduled" => ("bg-primary-subtle text-primary border border-primary", "Planlandı"),
+            "PreOpCleared" => ("bg-info-subtle text-info border border-info", "Pre-Op Hazır"),
+            "InProgress" => ("bg-warning text-dark", "Devam Ediyor"),
+            "Completed" => ("bg-success text-white", "Tamamlandı"),
+            "Cancelled" => ("bg-danger-subtle text-danger border border-danger", "İptal Edildi"),
+            "Postponed" => ("bg-secondary-subtle text-secondary border border-secondary", "Ertelendi"),
+            _ => ("bg-light text-dark", status),
+        };
+
+        builder.OpenElement(0, "span");
+        builder.AddAttribute(1, "class", $"badge {css}");
+        builder.AddContent(2, label);
+        builder.CloseElement();
+    };
+}

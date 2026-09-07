@@ -1,0 +1,17 @@
+@inject IStringLocalizer<SharedResources> Localizer
+
+<UiStatePanel Title="@(Title ?? Localizer["LoadingStateTitle"])"
+              Description="@(Description ?? Localizer["LoadingStateDescription"])"
+              Tone="loading"
+              Role="status"
+              AriaLive="polite"
+              IsBusy="true"
+              Icon="↻" />
+
+@code {
+    [Parameter]
+    public string? Title { get; set; }
+
+    [Parameter]
+    public string? Description { get; set; }
+}

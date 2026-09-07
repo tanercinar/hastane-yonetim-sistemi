@@ -1,0 +1,857 @@
+@namespace HospitalManagement.UI.Components.PatientMobile
+@using HospitalManagement.UI.Components
+@using HospitalManagement.UI.Services
+@inject IPlatformConnectivityService ConnectivityService
+@implements IDisposable
+
+<div class="patient-mobile-container" role="main" aria-label="Hasta Mobil Portalı">
+    <!-- Platform ve Çevrimiçi Durum Çubuğu -->
+    @if (!IsConnected)
+    {
+        <div class="mobile-offline-banner" role="alert" aria-live="assertive">
+            <span class="offline-icon" aria-hidden="true">⚠️</span>
+            <div class="offline-text">
+                <strong>İnternet Bağlantısı Kesildi</strong>
+                <p>Klinik veri güvenliği için canlı bağlantı gereklidir. Çevrimdışı işlem yapılamaz.</p>
+            </div>
+            <button type="button" class="mobile-touch-btn retry-btn" @onclick="CheckConnectionAsync" aria-label="Bağlantıyı Yeniden Dene">
+                Tekrar Dene
+            </button>
+        </div>
+    }
+
+    <!-- Sentetik Demo Uyarısı -->
+    <div class="demo-banner" role="note">
+        <span class="demo-badge">DEMO ORTAM</span>
+        <span class="demo-text">Bu portaldaki tüm hasta, randevu, reçete ve sonuçlar sentetiktir.</span>
+    </div>
+
+    <!-- Üst Başlık ve Geri Düğmesi -->
+    <header class="mobile-header">
+        @if (CanGoBack)
+        {
+            <button type="button" class="mobile-touch-btn back-btn" @onclick="HandleBackNavigation" aria-label="Geri Dön" id="mobile-back-button">
+                ←
+            </button>
+        }
+        else
+        {
+            <div class="header-logo" aria-hidden="true">🏥</div>
+        }
+        <div class="header-title-area">
+            <h1 class="header-title">@GetActiveTitle()</h1>
+            <span class="header-subtitle">Hasta Mobil İşlemleri</span>
+        </div>
+        <div class="header-status" title="Bağlantı Durumu">
+            <span class="status-dot @(IsConnected ? "status-online" : "status-offline")" aria-label="@(IsConnected ? "Çevrimiçi" : "Çevrimdışı")"></span>
+        </div>
+    </header>
+
+    <!-- Ana İçerik Alanı -->
+    <main class="mobile-content" id="mobile-main-content">
+        @if (!IsConnected)
+        {
+            <ConnectionRequiredState OnConnectionRestored="CheckConnectionAsync" />
+        }
+        else
+        {
+            @if (ActiveTab == "appointments")
+            {
+                <section class="tab-pane" aria-labelledby="tab-appointments-btn">
+                    <div class="pane-actions">
+                        <button type="button" class="mobile-touch-btn primary-action-btn" @onclick='() => SetActiveTab("book")' aria-label="Yeni Randevu Al">
+                            + Yeni Randevu Al
+                        </button>
+                    </div>
+
+                    @if (Appointments.Count == 0)
+                    {
+                        <EmptyState Title="Randevunuz Bulunmuyor" Description="Planlanmış veya geçmiş bir poliklinik randevunuz bulunmamaktadır." />
+                    }
+                    else
+                    {
+                        <div class="appointment-cards" role="list" aria-label="Randevu Listesi">
+                            @foreach (var appt in Appointments)
+                            {
+                                <article class="mobile-card" role="listitem">
+                                    <div class="card-header-row">
+                                        <span class="card-protocol">@appt.AppointmentNumber</span>
+                                        <span class="status-badge status-@appt.Status.ToLowerInvariant()">@GetStatusText(appt.Status)</span>
+                                    </div>
+                                    <h2 class="card-title">@appt.DepartmentName</h2>
+                                    <p class="card-doctor">Dr. @appt.DoctorName</p>
+                                    <div class="card-meta">
+                                        <span class="meta-item">📅 @appt.ScheduledDate.ToString("dd.MM.yyyy")</span>
+                                        <span class="meta-item">⏰ @appt.TimeSlot</span>
+                                    </div>
+                                    @if (!string.IsNullOrWhiteSpace(appt.Reason))
+                                    {
+                                        <p class="card-reason"><strong>Şikayet:</strong> @appt.Reason</p>
+                                    }
+                                    @if (appt.CanCancel)
+                                    {
+                                        <div class="card-action-row">
+                                            <button type="button" class="mobile-touch-btn danger-outline-btn" @onclick="() => CancelAppointmentAsync(appt.Id)" aria-label="Randevuyu İptal Et: @appt.DepartmentName">
+                                                İptal Et
+                                            </button>
+                                        </div>
+                                    }
+                                </article>
+                            }
+                        </div>
+                    }
+                </section>
+            }
+            else if (ActiveTab == "book")
+            {
+                <section class="tab-pane" aria-labelledby="tab-book-btn">
+                    @if (BookingStep == 1)
+                    {
+                        <div class="booking-step">
+                            <h2 class="step-title">1. Bölüm ve Hekim Seçin</h2>
+                            <div class="form-group">
+                                <label for="book-dept-select" class="form-label">Poliklinik</label>
+                                <select id="book-dept-select" class="mobile-select" @bind="SelectedDepartment">
+                                    <option value="Dahiliye">İç Hastalıkları (Dahiliye)</option>
+                                    <option value="Kardiyoloji">Kardiyoloji</option>
+                                    <option value="Goz">Göz Hastalıkları</option>
+                                    <option value="Ortopedi">Ortopedi ve Travmatoloji</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="book-reason-input" class="form-label">Şikayet / Başvuru Nedeni</label>
+                                <input type="text" id="book-reason-input" class="mobile-input" @bind="BookingReason" placeholder="Örn: Baş ağrısı, kontrol muayenesi" />
+                            </div>
+                            <button type="button" class="mobile-touch-btn primary-btn" @onclick="GoToSlotSelection" aria-label="Uygun Saatleri Görüntüle">
+                                Uygun Saatleri Gör →
+                            </button>
+                        </div>
+                    }
+                    else if (BookingStep == 2)
+                    {
+                        <div class="booking-step">
+                            <h2 class="step-title">2. Uygun Randevu Saati Seçin</h2>
+                            <p class="step-subtitle">Bölüm: <strong>@SelectedDepartment</strong></p>
+
+                            <div class="slots-grid" role="radiogroup" aria-label="Müsait Randevu Saatleri">
+                                @foreach (var slot in AvailableSlots)
+                                {
+                                    <button type="button"
+                                            class="mobile-touch-btn slot-btn @(SelectedSlot?.SlotId == slot.SlotId ? "selected-slot" : "") @(!slot.IsAvailable ? "disabled-slot" : "")"
+                                            disabled="@(!slot.IsAvailable)"
+                                            @onclick="() => SelectSlot(slot)"
+                                            aria-label="Saat @slot.Time - @slot.DoctorName">
+                                        <span class="slot-time">@slot.Time</span>
+                                        <span class="slot-doc">@slot.DoctorName</span>
+                                    </button>
+                                }
+                            </div>
+
+                            <div class="step-actions">
+                                <button type="button" class="mobile-touch-btn secondary-btn" @onclick="() => BookingStep = 1" aria-label="Geri">
+                                    ← Geri
+                                </button>
+                                <button type="button" class="mobile-touch-btn primary-btn" disabled="@(SelectedSlot == null)" @onclick="ConfirmBookingAsync" aria-label="Randevuyu Onayla">
+                                    Randevuyu Onayla
+                                </button>
+                            </div>
+                        </div>
+                    }
+                    else if (BookingStep == 3)
+                    {
+                        <div class="booking-success" role="status" aria-live="polite">
+                            <div class="success-icon" aria-hidden="true">✓</div>
+                            <h2 class="success-title">Randevunuz Onaylandı!</h2>
+                            <p class="success-desc">Randevunuz sisteme kaydedildi. Randevularım sekmesinden detayları takip edebilirsiniz.</p>
+                            <button type="button" class="mobile-touch-btn primary-btn" @onclick='() => { BookingStep = 1; SetActiveTab("appointments"); }' aria-label="Randevularıma Dön">
+                                Randevularıma Dön
+                            </button>
+                        </div>
+                    }
+                </section>
+            }
+            else if (ActiveTab == "prescriptions")
+            {
+                <section class="tab-pane" aria-labelledby="tab-rx-btn">
+                    @if (SelectedPrescription != null)
+                    {
+                        <!-- Reçete Detayı -->
+                        <div class="detail-view">
+                            <button type="button" class="mobile-touch-btn text-btn" @onclick="() => SelectedPrescription = null" aria-label="Reçeteler Listesine Dön">
+                                ← Reçetelerime Dön
+                            </button>
+                            <article class="mobile-card">
+                                <div class="card-header-row">
+                                    <span class="card-protocol">@SelectedPrescription.PrescriptionNumber</span>
+                                    <span class="status-badge status-@SelectedPrescription.DispenseStatus.ToLowerInvariant()">@GetDispenseText(SelectedPrescription.DispenseStatus)</span>
+                                </div>
+                                <h2 class="card-title">Dr. @SelectedPrescription.DoctorName</h2>
+                                <p class="card-meta">Düzenlenme: @SelectedPrescription.IssuedAt.ToString("dd.MM.yyyy HH:mm")</p>
+                                <p class="card-reason"><strong>Tanı:</strong> @SelectedPrescription.Diagnosis</p>
+
+                                <h3 class="subsection-title">Reçetedeki İlaçlar</h3>
+                                <ul class="medication-list" aria-label="İlaç Listesi">
+                                    @foreach (var med in SelectedPrescription.Items)
+                                    {
+                                        <li class="med-item">
+                                            <div class="med-header">
+                                                <strong>@med.MedicationName</strong>
+                                                <span class="med-qty">@med.Quantity Kutu</span>
+                                            </div>
+                                            <div class="med-dose">@med.Dosage — @med.Instructions</div>
+                                        </li>
+                                    }
+                                </ul>
+                            </article>
+                        </div>
+                    }
+                    else
+                    {
+                        @if (Prescriptions.Count == 0)
+                        {
+                            <EmptyState Title="Reçeteniz Bulunmuyor" Description="Adınıza düzenlenmiş bir e-reçete kaydı bulunmamaktadır." />
+                        }
+                        else
+                        {
+                            <div class="prescription-cards" role="list" aria-label="Reçete Listesi">
+                                @foreach (var rx in Prescriptions)
+                                {
+                                    <article class="mobile-card clickable-card" role="listitem" @onclick="() => SelectedPrescription = rx" tabindex="0" aria-label="Reçete @rx.PrescriptionNumber Detayını Aç">
+                                        <div class="card-header-row">
+                                            <span class="card-protocol">@rx.PrescriptionNumber</span>
+                                            <span class="status-badge status-@rx.DispenseStatus.ToLowerInvariant()">@GetDispenseText(rx.DispenseStatus)</span>
+                                        </div>
+                                        <h2 class="card-title">Dr. @rx.DoctorName</h2>
+                                        <p class="card-reason">@rx.Diagnosis</p>
+                                        <div class="card-meta">
+                                            <span>📅 @rx.IssuedAt.ToString("dd.MM.yyyy")</span>
+                                            <span>💊 @rx.Items.Count İlaç</span>
+                                        </div>
+                                        <div class="card-footer-row">
+                                            <span class="view-detail-hint">Ayrıntılar ve Talimatlar →</span>
+                                        </div>
+                                    </article>
+                                }
+                            </div>
+                        }
+                    }
+                </section>
+            }
+            else if (ActiveTab == "results")
+            {
+                <section class="tab-pane" aria-labelledby="tab-results-btn">
+                    <!-- Kategori Filtresi -->
+                    <div class="category-filters" role="group" aria-label="Sonuç Kategori Filtreleri">
+                        <button type="button" class="mobile-touch-btn filter-chip @(ActiveCategoryFilter == null ? "active-chip" : "")" @onclick="() => ActiveCategoryFilter = null">
+                            Tümü
+                        </button>
+                        <button type="button" class="mobile-touch-btn filter-chip @(ActiveCategoryFilter == "Laboratory" ? "active-chip" : "")" @onclick='() => ActiveCategoryFilter = "Laboratory"'>
+                            Laboratuvar
+                        </button>
+                        <button type="button" class="mobile-touch-btn filter-chip @(ActiveCategoryFilter == "Radiology" ? "active-chip" : "")" @onclick='() => ActiveCategoryFilter = "Radiology"'>
+                            Radyoloji
+                        </button>
+                    </div>
+
+                    @if (FilteredResults.Count == 0)
+                    {
+                        <EmptyState Title="Sonuç Bulunamadı" Description="Seçili kategoride onaylanmış kesin sonuç kaydı yoktur." />
+                    }
+                    else
+                    {
+                        <div class="result-cards" role="list" aria-label="Tahlil ve Tanı Sonuçları">
+                            @foreach (var res in FilteredResults)
+                            {
+                                <article class="mobile-card" role="listitem">
+                                    <div class="card-header-row">
+                                        <span class="card-protocol">@res.RequestNumber</span>
+                                        <span class="status-badge status-final">@res.Status</span>
+                                    </div>
+                                    <h2 class="card-title">@res.TestName</h2>
+                                    <div class="card-meta">
+                                        <span>Tür: @res.Category</span>
+                                        <span>Onay: @res.ApprovedAt.ToString("dd.MM.yyyy")</span>
+                                    </div>
+                                    <div class="result-box @(res.IsCritical ? "critical-box" : "")">
+                                        <div class="result-summary">
+                                            <strong>Sonuç:</strong> @res.ResultSummary
+                                        </div>
+                                        @if (!string.IsNullOrWhiteSpace(res.ReferenceRange))
+                                        {
+                                            <div class="result-ref">
+                                                <small>Referans Aralığı: @res.ReferenceRange</small>
+                                            </div>
+                                        }
+                                        @if (res.IsCritical)
+                                        {
+                                            <div class="critical-warning" role="alert">
+                                                ⚠️ Hekim değerlendirmesi gerektiren sonuç.
+                                            </div>
+                                        }
+                                    </div>
+                                </article>
+                            }
+                        </div>
+                    }
+                </section>
+            }
+        }
+    </main>
+
+    <!-- Alt Navigasyon Çubuğu (Bottom Navigation Bar) -->
+    <nav class="mobile-bottom-nav" role="navigation" aria-label="Hasta Alt Menü">
+        <button type="button" id="tab-appointments-btn" class="nav-item @(ActiveTab == "appointments" ? "nav-item-active" : "")" @onclick='() => SetActiveTab("appointments")' aria-label="Randevularım Sekmesi">
+            <span class="nav-icon" aria-hidden="true">📅</span>
+            <span class="nav-label">Randevular</span>
+        </button>
+        <button type="button" id="tab-book-btn" class="nav-item @(ActiveTab == "book" ? "nav-item-active" : "")" @onclick='() => SetActiveTab("book")' aria-label="Yeni Randevu Al Sekmesi">
+            <span class="nav-icon" aria-hidden="true">➕</span>
+            <span class="nav-label">Randevu Al</span>
+        </button>
+        <button type="button" id="tab-rx-btn" class="nav-item @(ActiveTab == "prescriptions" ? "nav-item-active" : "")" @onclick='() => SetActiveTab("prescriptions")' aria-label="Reçetelerim Sekmesi">
+            <span class="nav-icon" aria-hidden="true">💊</span>
+            <span class="nav-label">Reçeteler</span>
+        </button>
+        <button type="button" id="tab-results-btn" class="nav-item @(ActiveTab == "results" ? "nav-item-active" : "")" @onclick='() => SetActiveTab("results")' aria-label="Sonuçlarım Sekmesi">
+            <span class="nav-icon" aria-hidden="true">🔬</span>
+            <span class="nav-label">Sonuçlar</span>
+        </button>
+    </nav>
+</div>
+
+<style>
+    .patient-mobile-container {
+        display: flex;
+        flex-direction: column;
+        width: 100%;
+        max-width: 480px;
+        margin: 0 auto;
+        min-height: 100vh;
+        background-color: var(--hys-color-bg, #f8fafc);
+        box-sizing: border-box;
+        font-family: system-ui, -apple-system, sans-serif;
+    }
+
+    .mobile-offline-banner {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        background: #fee2e2;
+        color: #991b1b;
+        padding: 10px 14px;
+        border-bottom: 2px solid #ef4444;
+        font-size: 0.85rem;
+    }
+
+    .demo-banner {
+        background: #eff6ff;
+        color: #1e40af;
+        padding: 6px 12px;
+        font-size: 0.75rem;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        border-bottom: 1px solid #bfdbfe;
+    }
+
+    .demo-badge {
+        background: #2563eb;
+        color: #fff;
+        font-weight: 700;
+        padding: 2px 6px;
+        border-radius: 4px;
+    }
+
+    .mobile-header {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 12px 16px;
+        background: #fff;
+        border-bottom: 1px solid #e2e8f0;
+        position: sticky;
+        top: 0;
+        z-index: 10;
+    }
+
+    .header-title-area {
+        flex: 1;
+    }
+
+    .header-title {
+        font-size: 1.15rem;
+        font-weight: 700;
+        margin: 0;
+        color: #0f172a;
+    }
+
+    .header-subtitle {
+        font-size: 0.75rem;
+        color: #64748b;
+    }
+
+    .status-dot {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        display: inline-block;
+    }
+
+    .status-online { background-color: #22c55e; }
+    .status-offline { background-color: #ef4444; }
+
+    .mobile-content {
+        flex: 1;
+        padding: 14px;
+        padding-bottom: 84px; /* Bottom nav clearance */
+        overflow-y: auto;
+    }
+
+    .mobile-touch-btn {
+        min-height: 44px;
+        min-width: 44px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 8px;
+        font-weight: 600;
+        font-size: 0.95rem;
+        cursor: pointer;
+        padding: 8px 16px;
+        touch-action: manipulation;
+        border: none;
+        box-sizing: border-box;
+    }
+
+    .primary-btn, .primary-action-btn {
+        background-color: #0284c7;
+        color: #ffffff;
+        width: 100%;
+    }
+
+    .secondary-btn {
+        background-color: #f1f5f9;
+        color: #334155;
+        border: 1px solid #cbd5e1;
+    }
+
+    .danger-outline-btn {
+        background: transparent;
+        color: #dc2626;
+        border: 1px solid #dc2626;
+        padding: 6px 12px;
+        font-size: 0.85rem;
+    }
+
+    .back-btn {
+        background: #f1f5f9;
+        color: #0f172a;
+        font-size: 1.25rem;
+        padding: 0;
+    }
+
+    .mobile-card {
+        background: #ffffff;
+        border: 1px solid #e2e8f0;
+        border-radius: 10px;
+        padding: 14px;
+        margin-bottom: 12px;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+    }
+
+    .clickable-card {
+        cursor: pointer;
+    }
+
+    .card-header-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 6px;
+    }
+
+    .card-protocol {
+        font-family: monospace;
+        font-size: 0.8rem;
+        color: #64748b;
+    }
+
+    .status-badge {
+        font-size: 0.75rem;
+        font-weight: 600;
+        padding: 2px 8px;
+        border-radius: 12px;
+    }
+
+    .status-scheduled { background: #e0f2fe; color: #0369a1; }
+    .status-completed, .status-dispensed, .status-final { background: #dcfce7; color: #15803d; }
+    .status-cancelled { background: #fee2e2; color: #b91c1c; }
+    .status-pending { background: #fef3c7; color: #b45309; }
+
+    .card-title {
+        font-size: 1rem;
+        font-weight: 700;
+        margin: 4px 0;
+        color: #0f172a;
+    }
+
+    .card-doctor {
+        font-size: 0.85rem;
+        color: #475569;
+        margin: 0 0 6px 0;
+    }
+
+    .card-meta {
+        display: flex;
+        gap: 12px;
+        font-size: 0.8rem;
+        color: #64748b;
+        margin-bottom: 6px;
+    }
+
+    .card-reason {
+        font-size: 0.85rem;
+        color: #334155;
+        margin: 6px 0;
+    }
+
+    .card-action-row {
+        margin-top: 10px;
+        display: flex;
+        justify-content: flex-end;
+    }
+
+    .mobile-select, .mobile-input {
+        width: 100%;
+        min-height: 44px;
+        border: 1px solid #cbd5e1;
+        border-radius: 8px;
+        padding: 8px 12px;
+        font-size: 0.95rem;
+        margin-top: 4px;
+        box-sizing: border-box;
+    }
+
+    .form-group {
+        margin-bottom: 14px;
+    }
+
+    .form-label {
+        font-size: 0.85rem;
+        font-weight: 600;
+        color: #334155;
+    }
+
+    .slots-grid {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 10px;
+        margin-bottom: 16px;
+    }
+
+    .slot-btn {
+        flex-direction: column;
+        border: 1px solid #cbd5e1;
+        background: #fff;
+        padding: 10px;
+        text-align: center;
+    }
+
+    .selected-slot {
+        background: #e0f2fe;
+        border-color: #0284c7;
+        color: #0369a1;
+        font-weight: 700;
+    }
+
+    .disabled-slot {
+        opacity: 0.4;
+        cursor: not-allowed;
+    }
+
+    .step-actions {
+        display: flex;
+        gap: 10px;
+    }
+
+    .medication-list {
+        list-style: none;
+        padding: 0;
+        margin: 10px 0;
+    }
+
+    .med-item {
+        border-bottom: 1px solid #f1f5f9;
+        padding: 8px 0;
+    }
+
+    .med-header {
+        display: flex;
+        justify-content: space-between;
+        font-size: 0.9rem;
+    }
+
+    .med-dose {
+        font-size: 0.8rem;
+        color: #64748b;
+    }
+
+    .category-filters {
+        display: flex;
+        gap: 8px;
+        margin-bottom: 14px;
+    }
+
+    .filter-chip {
+        min-height: 44px;
+        background: #f1f5f9;
+        color: #475569;
+        border: 1px solid #e2e8f0;
+        border-radius: 20px;
+        padding: 6px 14px;
+        font-size: 0.85rem;
+    }
+
+    .active-chip {
+        background: #0284c7;
+        color: #fff;
+        border-color: #0284c7;
+    }
+
+    .result-box {
+        background: #f8fafc;
+        border-left: 3px solid #0284c7;
+        padding: 8px 10px;
+        margin-top: 8px;
+        font-size: 0.85rem;
+    }
+
+    .critical-box {
+        border-left-color: #dc2626;
+        background: #fef2f2;
+    }
+
+    .critical-warning {
+        color: #b91c1c;
+        font-weight: 700;
+        font-size: 0.8rem;
+        margin-top: 4px;
+    }
+
+    .mobile-bottom-nav {
+        position: fixed;
+        bottom: 0;
+        left: 50%;
+        transform: translateX(-50%);
+        width: 100%;
+        max-width: 480px;
+        height: 64px;
+        background: #ffffff;
+        border-top: 1px solid #e2e8f0;
+        display: flex;
+        justify-content: space-around;
+        align-items: center;
+        z-index: 20;
+    }
+
+    .nav-item {
+        min-width: 44px;
+        min-height: 44px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        background: none;
+        border: none;
+        color: #64748b;
+        cursor: pointer;
+        padding: 4px;
+        touch-action: manipulation;
+    }
+
+    .nav-item-active {
+        color: #0284c7;
+        font-weight: 700;
+    }
+
+    .nav-icon {
+        font-size: 1.25rem;
+    }
+
+    .nav-label {
+        font-size: 0.7rem;
+    }
+
+    @@media (forced-colors: active) {
+        .patient-mobile-container, .mobile-card, .mobile-bottom-nav {
+            forced-color-adjust: none;
+            background-color: Canvas;
+            color: CanvasText;
+            border-color: CanvasText;
+        }
+        .mobile-touch-btn, .nav-item {
+            border: 1px solid ButtonText;
+        }
+    }
+</style>
+
+@code {
+    [Parameter]
+    public List<PatientMobileAppointmentDto> Appointments { get; set; } = [];
+
+    [Parameter]
+    public List<PatientMobilePrescriptionDto> Prescriptions { get; set; } = [];
+
+    [Parameter]
+    public List<PatientMobileDiagnosticResultDto> DiagnosticResults { get; set; } = [];
+
+    [Parameter]
+    public List<PatientMobileSlotDto> AvailableSlots { get; set; } = [];
+
+    [Parameter]
+    public EventCallback<Guid> OnCancelAppointment { get; set; }
+
+    [Parameter]
+    public EventCallback<PatientMobileSlotDto> OnBookAppointment { get; set; }
+
+    public string ActiveTab { get; private set; } = "appointments";
+    public string? ActiveCategoryFilter { get; set; }
+    public PatientMobilePrescriptionDto? SelectedPrescription { get; set; }
+    public PatientMobileDiagnosticResultDto? SelectedDiagnosticResult { get; set; }
+    public int BookingStep { get; set; } = 1;
+    public string SelectedDepartment { get; set; } = "Dahiliye";
+    public string BookingReason { get; set; } = string.Empty;
+    public PatientMobileSlotDto? SelectedSlot { get; set; }
+    public bool IsConnected { get; private set; } = true;
+
+    public bool CanGoBack => SelectedPrescription != null || SelectedDiagnosticResult != null || (ActiveTab == "book" && BookingStep > 1);
+
+    protected override void OnInitialized()
+    {
+        IsConnected = ConnectivityService.IsConnected;
+        ConnectivityService.ConnectivityChanged += OnConnectivityChanged;
+    }
+
+    private void OnConnectivityChanged(object? sender, bool isConnected)
+    {
+        IsConnected = isConnected;
+        InvokeAsync(StateHasChanged);
+    }
+
+    public async Task CheckConnectionAsync()
+    {
+        IsConnected = await ConnectivityService.CheckConnectivityAsync();
+        StateHasChanged();
+    }
+
+    public void SetActiveTab(string tab)
+    {
+        ActiveTab = tab;
+        SelectedPrescription = null;
+        SelectedDiagnosticResult = null;
+        BookingStep = 1;
+    }
+
+    public void SetDiagnosticResults(List<PatientMobileDiagnosticResultDto> results)
+    {
+        DiagnosticResults = results;
+    }
+
+    public bool HandleHardwareBack()
+    {
+        if (CanGoBack)
+        {
+            HandleBackNavigation();
+            return true;
+        }
+        return false;
+    }
+
+    public void HandleBackNavigation()
+    {
+        if (SelectedPrescription != null)
+        {
+            SelectedPrescription = null;
+        }
+        else if (SelectedDiagnosticResult != null)
+        {
+            SelectedDiagnosticResult = null;
+        }
+        else if (ActiveTab == "book" && BookingStep > 1)
+        {
+            BookingStep--;
+        }
+        else
+        {
+            SetActiveTab("appointments");
+        }
+    }
+
+    public void GoToSlotSelection()
+    {
+        BookingStep = 2;
+    }
+
+    public void SelectSlot(PatientMobileSlotDto slot)
+    {
+        if (slot.IsAvailable)
+        {
+            SelectedSlot = slot;
+        }
+    }
+
+    public async Task ConfirmBookingAsync()
+    {
+        if (SelectedSlot != null)
+        {
+            if (OnBookAppointment.HasDelegate)
+            {
+                await OnBookAppointment.InvokeAsync(SelectedSlot);
+            }
+            BookingStep = 3;
+        }
+    }
+
+    public async Task CancelAppointmentAsync(Guid appointmentId)
+    {
+        if (OnCancelAppointment.HasDelegate)
+        {
+            await OnCancelAppointment.InvokeAsync(appointmentId);
+        }
+    }
+
+    public IReadOnlyList<PatientMobileDiagnosticResultDto> FilteredResults =>
+        string.IsNullOrEmpty(ActiveCategoryFilter)
+            ? DiagnosticResults
+            : DiagnosticResults.Where(r => r.Category.Equals(ActiveCategoryFilter, StringComparison.OrdinalIgnoreCase)).ToList();
+
+    public string GetActiveTitle() => ActiveTab switch
+    {
+        "appointments" => "Randevularım",
+        "book" => "Yeni Randevu",
+        "prescriptions" => "Reçetelerim",
+        "results" => "Tahlil & Sonuçlarım",
+        _ => "Hasta Portalı"
+    };
+
+    public string GetStatusText(string status) => status switch
+    {
+        "Scheduled" => "Planlandı",
+        "Completed" => "Tamamlandı",
+        "Cancelled" => "İptal Edildi",
+        _ => status
+    };
+
+    public string GetDispenseText(string status) => status switch
+    {
+        "Dispensed" => "Teslim Edildi",
+        "Pending" => "Eczanede Bekliyor",
+        "PartiallyDispensed" => "Kısmi Teslim",
+        _ => status
+    };
+
+    public void Dispose()
+    {
+        ConnectivityService.ConnectivityChanged -= OnConnectivityChanged;
+    }
+}

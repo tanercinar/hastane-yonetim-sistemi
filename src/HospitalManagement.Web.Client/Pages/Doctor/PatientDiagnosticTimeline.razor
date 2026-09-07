@@ -1,0 +1,223 @@
+@page "/doctor/patient/{PatientId:guid}/diagnostics"
+@using HospitalManagement.Contracts.Diagnostics
+@using HospitalManagement.Web.Client.Diagnostics
+@inject IDiagnosticsApiClient DiagnosticsApi
+@inject NavigationManager Navigation
+
+<PageTitle>Hasta Tanısal Zaman Çizelgesi - Klinik Görünüm</PageTitle>
+
+<div class="container-fluid px-4 py-3">
+    <!-- Header -->
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <div>
+            <h4 class="mb-0 text-primary fw-bold">
+                <i class="bi bi-clock-history me-2"></i>Hasta Klinik Tanısal Zaman Çizelgesi
+            </h4>
+            <p class="text-muted small mb-0">Hasta ID: <span class="font-monospace">@PatientId</span> için entegre laboratuvar, radyoloji, patoloji ve kan bankası geçmişi</p>
+        </div>
+        <div class="d-flex gap-2">
+            <button class="btn btn-outline-secondary btn-sm" @onclick='() => Navigation.NavigateTo("staff/patients")'>
+                <i class="bi bi-arrow-left me-1"></i>Hasta Listesi
+            </button>
+            <button class="btn btn-outline-primary btn-sm" @onclick="LoadTimelineAsync">
+                <i class="bi bi-arrow-clockwise me-1"></i>Yenile
+            </button>
+        </div>
+    </div>
+
+    <!-- Demo Banner -->
+    <div class="alert alert-info d-flex align-items-center mb-4 py-2" role="alert">
+        <i class="bi bi-info-circle-fill flex-shrink-0 me-2"></i>
+        <div class="small">
+            <strong>KLİNİK ZAMAN ÇİZELGESİ:</strong> Hastanın tüm tanısal süreçleri (istem, ara aşamalar, teknik ve kesin onaylar, kritik bayraklar) hekim değerlendirmesi için kronolojik olarak listelenmektedir.
+        </div>
+    </div>
+
+    @if (!string.IsNullOrWhiteSpace(_errorMessage))
+    {
+        <div class="alert alert-danger alert-dismissible fade show" role="alert">
+            <i class="bi bi-exclamation-circle-fill me-2"></i>@_errorMessage
+            <button type="button" class="btn-close" @onclick="() => _errorMessage = null"></button>
+        </div>
+    }
+
+    <!-- Filter Buttons -->
+    <div class="d-flex gap-2 mb-3">
+        <button class="btn btn-sm @(_categoryFilter == null ? "btn-primary" : "btn-outline-secondary")" @onclick="() => SetCategoryFilter(null)">
+            Tümü (@(_timeline?.TotalEntries ?? 0))
+        </button>
+        <button class="btn btn-sm @(_categoryFilter == "Laboratory" ? "btn-primary" : "btn-outline-secondary")" @onclick='() => SetCategoryFilter("Laboratory")'>
+            <i class="bi bi-eyedropper me-1"></i>Laboratuvar
+        </button>
+        <button class="btn btn-sm @(_categoryFilter == "Radiology" ? "btn-primary" : "btn-outline-secondary")" @onclick='() => SetCategoryFilter("Radiology")'>
+            <i class="bi bi-camera me-1"></i>Radyoloji
+        </button>
+        <button class="btn btn-sm @(_categoryFilter == "Pathology" ? "btn-primary" : "btn-outline-secondary")" @onclick='() => SetCategoryFilter("Pathology")'>
+            <i class="bi bi-virus me-1"></i>Patoloji
+        </button>
+        <button class="btn btn-sm @(_categoryFilter == "BloodBank" ? "btn-primary" : "btn-outline-secondary")" @onclick='() => SetCategoryFilter("BloodBank")'>
+            <i class="bi bi-droplet me-1"></i>Kan Bankası
+        </button>
+    </div>
+
+    @if (_isLoading)
+    {
+        <div class="text-center py-5">
+            <div class="spinner-border text-primary" role="status">
+                <span class="visually-hidden">Yükleniyor...</span>
+            </div>
+            <div class="text-muted mt-2">Zaman çizelgesi oluşturuluyor...</div>
+        </div>
+    }
+    else if (FilteredEntries.Count == 0)
+    {
+        <div class="card border-0 shadow-sm text-center py-5">
+            <div class="card-body">
+                <i class="bi bi-journal-x text-muted fs-1 mb-2"></i>
+                <h5 class="text-muted">Kayıt Bulunamadı</h5>
+                <p class="text-muted small mb-0">Bu hasta için seçilen kategoride henüz tanısal işlem kaydı bulunmamaktadır.</p>
+            </div>
+        </div>
+    }
+    else
+    {
+        <div class="timeline-container">
+            @foreach (var entry in FilteredEntries)
+            {
+                <div class="card border-0 shadow-sm mb-3 @(entry.HasCriticalFlag ? "border-start border-danger border-4" : "")">
+                    <div class="card-header bg-white d-flex justify-content-between align-items-center py-3">
+                        <div class="d-flex align-items-center gap-2">
+                            <span class="badge @GetCategoryBadgeClass(entry.Category)">@GetCategoryName(entry.Category)</span>
+                            <h6 class="mb-0 fw-bold">@entry.Title</h6>
+                            @if (entry.HasCriticalFlag)
+                            {
+                                <span class="badge bg-danger"><i class="bi bi-exclamation-triangle-fill me-1"></i>KRİTİK DEĞER</span>
+                            }
+                            <span class="badge bg-light text-dark border">@entry.Status</span>
+                        </div>
+                        <div class="text-end">
+                            <small class="text-muted">@entry.EventDateUtc.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</small>
+                            <small class="text-primary d-block">@entry.PerformedBy</small>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        @if (!string.IsNullOrWhiteSpace(entry.SummaryText))
+                        {
+                            <div class="p-2 mb-2 bg-light rounded text-dark small">
+                                @entry.SummaryText
+                            </div>
+                        }
+
+                        @if (entry.Parameters != null && entry.Parameters.Count > 0)
+                        {
+                            <div class="table-responsive mt-2">
+                                <table class="table table-sm table-bordered align-middle mb-0">
+                                    <thead class="table-light">
+                                        <tr>
+                                            <th>Parametre</th>
+                                            <th>Değer</th>
+                                            <th>Birim</th>
+                                            <th>Referans Aralığı</th>
+                                            <th>Yorum</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        @foreach (var p in entry.Parameters)
+                                        {
+                                            <tr class="@(p.IsCritical ? "table-danger" : "")">
+                                                <td class="fw-semibold">@p.Name</td>
+                                                <td class="fw-bold @(p.IsCritical ? "text-danger" : "")">@p.Value</td>
+                                                <td>@p.Unit</td>
+                                                <td><small class="text-muted">@p.ReferenceRange</small></td>
+                                                <td>
+                                                    @if (p.IsCritical)
+                                                    {
+                                                        <span class="badge bg-danger">Kritik</span>
+                                                    }
+                                                    else if (p.Interpretation == "High")
+                                                    {
+                                                        <span class="badge bg-warning text-dark">Yüksek</span>
+                                                    }
+                                                    else if (p.Interpretation == "Low")
+                                                    {
+                                                        <span class="badge bg-warning text-dark">Düşük</span>
+                                                    }
+                                                    else
+                                                    {
+                                                        <span class="badge bg-success">Normal</span>
+                                                    }
+                                                </td>
+                                            </tr>
+                                        }
+                                    </tbody>
+                                </table>
+                            </div>
+                        }
+                    </div>
+                </div>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter]
+    public Guid PatientId { get; set; }
+
+    private bool _isLoading = true;
+    private string? _errorMessage;
+    private string? _categoryFilter;
+    private PatientDiagnosticTimelineResponse? _timeline;
+
+    private List<TimelineEntryResponse> FilteredEntries =>
+        _timeline?.Entries.Where(e => string.IsNullOrWhiteSpace(_categoryFilter) || e.Category == _categoryFilter).ToList() ?? [];
+
+    protected override async Task OnParametersSetAsync()
+    {
+        await LoadTimelineAsync();
+    }
+
+    private async Task LoadTimelineAsync()
+    {
+        if (PatientId == Guid.Empty) return;
+
+        _isLoading = true;
+        _errorMessage = null;
+
+        try
+        {
+            _timeline = await DiagnosticsApi.GetPatientDiagnosticTimelineAsync(PatientId);
+        }
+        catch (Exception)
+        {
+            _errorMessage = "Tanısal zaman çizelgesi yüklenemedi. Bağlantınızı kontrol edip yeniden deneyin.";
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+    }
+
+    private void SetCategoryFilter(string? cat)
+    {
+        _categoryFilter = cat;
+    }
+
+    private static string GetCategoryName(string cat) => cat switch
+    {
+        "Laboratory" => "Laboratuvar",
+        "Radiology" => "Radyoloji",
+        "Pathology" => "Patoloji",
+        "BloodBank" => "Kan Bankası",
+        _ => cat,
+    };
+
+    private static string GetCategoryBadgeClass(string cat) => cat switch
+    {
+        "Laboratory" => "bg-primary",
+        "Radiology" => "bg-info text-dark",
+        "Pathology" => "bg-purple text-white",
+        "BloodBank" => "bg-danger",
+        _ => "bg-secondary",
+    };
+}

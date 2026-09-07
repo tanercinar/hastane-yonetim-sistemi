@@ -1,0 +1,785 @@
+@page "/emergency/board"
+@using HospitalManagement.Contracts.Emergency
+@using HospitalManagement.Web.Client.Emergency
+@using Microsoft.AspNetCore.SignalR.Client
+@inject IEmergencyApiClient EmergencyApi
+@inject NavigationManager Navigation
+@implements IAsyncDisposable
+
+<div class="container-fluid py-3">
+    <!-- Header -->
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <div>
+            <h2 class="fw-bold mb-0"><i class="bi bi-display me-2 text-danger"></i>Acil Servis Takip Panosu</h2>
+            <p class="text-muted mb-0">Canlı acil hasta akışı, triyaj öncelikleri, alan dolulukları ve bekleme süreleri (SignalR Gerçek Zamanlı).</p>
+        </div>
+        <div class="d-flex align-items-center gap-2">
+            @if (_hubConnection?.State == HubConnectionState.Connected)
+            {
+                <span class="badge bg-success-subtle text-success border border-success px-2 py-1">
+                    <i class="bi bi-broadcast me-1"></i> Canlı Bağlantı Aktif
+                </span>
+            }
+            else
+            {
+                <span class="badge bg-warning-subtle text-warning border border-warning px-2 py-1">
+                    <i class="bi bi-arrow-repeat me-1"></i> Bağlantı Bekleniyor...
+                </span>
+            }
+            <button class="btn btn-outline-primary btn-sm" @onclick="LoadBoardDataAsync">
+                <i class="bi bi-arrow-clockwise me-1"></i> Yenile
+            </button>
+        </div>
+    </div>
+
+    <!-- Alert Messages -->
+    @if (!string.IsNullOrWhiteSpace(_errorMessage))
+    {
+        <div class="alert alert-danger alert-dismissible fade show" role="alert">
+            <i class="bi bi-exclamation-triangle-fill me-2"></i>@_errorMessage
+            <button type="button" class="btn-close" @onclick="() => _errorMessage = null"></button>
+        </div>
+    }
+    @if (!string.IsNullOrWhiteSpace(_successMessage))
+    {
+        <div class="alert alert-success alert-dismissible fade show" role="alert">
+            <i class="bi bi-check-circle-fill me-2"></i>@_successMessage
+            <button type="button" class="btn-close" @onclick="() => _successMessage = null"></button>
+        </div>
+    }
+
+    <!-- KPI Summary Row -->
+    @if (_summary != null)
+    {
+        <div class="row g-3 mb-4">
+            <div class="col-lg-2 col-md-4 col-6">
+                <div class="card border-0 shadow-sm p-3 text-center bg-light">
+                    <span class="text-muted small">Aktif Acil Hastası</span>
+                    <h2 class="fw-bold text-dark my-1">@_summary.TotalActiveAdmissions</h2>
+                    <small class="text-muted">Toplam Takipte</small>
+                </div>
+            </div>
+            <div class="col-lg-2 col-md-4 col-6">
+                <div class="card border-0 shadow-sm p-3 text-center @(_summary.WaitingTriageCount > 0 ? "border-danger border-2 bg-danger-subtle" : "bg-light")">
+                    <span class="text-danger small fw-bold">Triyaj Bekleyen</span>
+                    <h2 class="fw-bold text-danger my-1">@_summary.WaitingTriageCount</h2>
+                    <small class="text-muted">Ort. @_summary.AverageWaitMinutesTriage dk bekleme</small>
+                </div>
+            </div>
+            <div class="col-lg-2 col-md-4 col-6">
+                <div class="card border-0 shadow-sm p-3 text-center @(_summary.TriagedWaitingDoctorCount > 0 ? "border-warning border-2 bg-warning-subtle" : "bg-light")">
+                    <span class="text-warning-emphasis small fw-bold">Hekim Bekleyen</span>
+                    <h2 class="fw-bold text-warning-emphasis my-1">@_summary.TriagedWaitingDoctorCount</h2>
+                    <small class="text-muted">Ort. @_summary.AverageWaitMinutesDoctor dk bekleme</small>
+                </div>
+            </div>
+            <div class="col-lg-2 col-md-4 col-6">
+                <div class="card border-0 shadow-sm p-3 text-center bg-light">
+                    <span class="text-primary small fw-semibold">Değerlendirmede</span>
+                    <h2 class="fw-bold text-primary my-1">@_summary.InEvaluationCount</h2>
+                    <small class="text-muted">Hekim Muayenesinde</small>
+                </div>
+            </div>
+            <div class="col-lg-2 col-md-4 col-6">
+                <div class="card border-0 shadow-sm p-3 text-center bg-light">
+                    <span class="text-secondary small fw-semibold">Gözlemde</span>
+                    <h2 class="fw-bold text-secondary my-1">@_summary.InObservationCount</h2>
+                    <small class="text-muted">Tedavi &amp; Tetkik Takibi</small>
+                </div>
+            </div>
+            <div class="col-lg-2 col-md-4 col-6">
+                <div class="card border-0 shadow-sm p-3 text-center bg-light">
+                    <span class="text-success small fw-semibold">Bugün Taburcu</span>
+                    <h2 class="fw-bold text-success my-1">@_summary.TodayDischargedCount</h2>
+                    <small class="text-muted">Ort. Kalış: @_summary.AverageLengthOfStayMinutes dk</small>
+                </div>
+            </div>
+        </div>
+
+        <!-- Triage Level Breakdown Bar -->
+        <div class="card border-0 shadow-sm mb-4">
+            <div class="card-body p-3">
+                <div class="d-flex flex-wrap align-items-center justify-content-between gap-3">
+                    <span class="fw-bold small text-muted text-uppercase"><i class="bi bi-funnel me-1"></i>Triyaj Dağılımı:</span>
+                    <div class="d-flex flex-wrap gap-2">
+                        <button class="btn btn-sm @(_selectedTriageFilter == "Red1Resuscitation" ? "btn-danger" : "btn-outline-danger")"
+                                @onclick='() => SetTriageFilter("Red1Resuscitation")'>
+                            🔴 Kırmızı 1: <strong>@_summary.Red1Count</strong>
+                        </button>
+                        <button class="btn btn-sm @(_selectedTriageFilter == "Red2Emergency" ? "btn-danger" : "btn-outline-danger")"
+                                @onclick='() => SetTriageFilter("Red2Emergency")'>
+                            🔴 Kırmızı 2: <strong>@_summary.Red2Count</strong>
+                        </button>
+                        <button class="btn btn-sm @(_selectedTriageFilter == "YellowUrgent" ? "btn-warning text-dark" : "btn-outline-warning text-dark")"
+                                @onclick='() => SetTriageFilter("YellowUrgent")'>
+                            🟡 Sarı: <strong>@_summary.YellowCount</strong>
+                        </button>
+                        <button class="btn btn-sm @(_selectedTriageFilter == "GreenStandard" ? "btn-success" : "btn-outline-success")"
+                                @onclick='() => SetTriageFilter("GreenStandard")'>
+                            🟢 Yeşil: <strong>@_summary.GreenCount</strong>
+                        </button>
+                        <button class="btn btn-sm @(_selectedTriageFilter == "BlackExpectant" ? "btn-dark" : "btn-outline-dark")"
+                                @onclick='() => SetTriageFilter("BlackExpectant")'>
+                            ⚫ Siyah: <strong>@_summary.BlackCount</strong>
+                        </button>
+                        @if (_selectedTriageFilter != null || _selectedStatusFilter != null || !string.IsNullOrWhiteSpace(_searchQuery))
+                        {
+                            <button class="btn btn-sm btn-link text-muted" @onclick="ClearFilters">
+                                <i class="bi bi-x-circle me-1"></i>Filtreleri Temizle
+                            </button>
+                        }
+                    </div>
+                </div>
+            </div>
+        </div>
+    }
+
+    <!-- Filter & Search Bar -->
+    <div class="card border-0 shadow-sm mb-3">
+        <div class="card-body p-3">
+            <div class="row g-2 align-items-center">
+                <div class="col-md-4">
+                    <div class="input-group input-group-sm">
+                        <span class="input-group-text bg-white"><i class="bi bi-search"></i></span>
+                        <input type="text" class="form-control border-start-0" placeholder="Protokol no veya şikâyet ara..."
+                               @bind="_searchQuery" @bind:event="oninput" />
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <select class="form-select form-select-sm" @bind="_selectedStatusFilter">
+                        <option value="">-- Tüm Durumlar --</option>
+                        <option value="WaitingTriage">Triyaj Bekliyor</option>
+                        <option value="TriagedWaitingDoctor">Hekim Bekliyor</option>
+                        <option value="InEvaluation">Değerlendirmede</option>
+                        <option value="InObservation">Gözlemde</option>
+                    </select>
+                </div>
+                <div class="col-md-3">
+                    <select class="form-select form-select-sm" @bind="_selectedZoneFilter">
+                        <option value="">-- Tüm Alanlar --</option>
+                        <option value="Kırmızı">Kırmızı Alan</option>
+                        <option value="Sarı">Sarı Alan</option>
+                        <option value="Yeşil">Yeşil Alan</option>
+                        <option value="Resüsitasyon">Resüsitasyon Odası</option>
+                    </select>
+                </div>
+                <div class="col-md-2 text-end">
+                    <span class="badge bg-light text-dark border">@FilteredWorklist.Count Hasta</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Active Worklist Table -->
+    <div class="card border-0 shadow-sm">
+        @if (_isLoading)
+        {
+            <div class="text-center py-5">
+                <div class="spinner-border text-danger" role="status">
+                    <span class="visually-hidden">Yükleniyor...</span>
+                </div>
+                <p class="text-muted mt-2">Acil panosu yükleniyor...</p>
+            </div>
+        }
+        else if (FilteredWorklist.Count == 0)
+        {
+            <div class="text-center py-5 text-muted">
+                <i class="bi bi-check2-circle fs-1 d-block mb-2 text-success"></i>
+                Seçilen kriterlere uygun aktif acil hasta kaydı bulunmuyor.
+            </div>
+        }
+        else
+        {
+            <div class="table-responsive">
+                <table class="table table-hover align-middle mb-0">
+                    <thead class="table-light">
+                        <tr>
+                            <th style="width: 130px;">Triyaj</th>
+                            <th>Protokol No</th>
+                            <th>Geliş</th>
+                            <th>Şikâyet &amp; Triyaj Gerekçesi</th>
+                            <th>Alan / Yatak</th>
+                            <th>Durum</th>
+                            <th>Bekleme Süresi</th>
+                            <th class="text-end">İşlemler</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var item in FilteredWorklist)
+                        {
+                            <tr class="@GetRowHighlightClass(item.TriageLevel)">
+                                <td>@GetTriageLevelBadge(item.TriageLevel)</td>
+                                <td>
+                                    <span class="fw-bold font-monospace text-dark">@item.EmergencyProtocolNumber</span>
+                                </td>
+                                <td>@GetArrivalBadge(item.ArrivalType)</td>
+                                <td>
+                                    <div class="fw-semibold text-dark">@item.ChiefComplaint</div>
+                                    @if (!string.IsNullOrWhiteSpace(item.TriageCategoryReason))
+                                    {
+                                        <small class="text-muted d-block text-truncate" style="max-width: 350px;">
+                                            <i class="bi bi-chat-left-text me-1"></i>@item.TriageCategoryReason
+                                        </small>
+                                    }
+                                </td>
+                                <td>
+                                    @if (!string.IsNullOrWhiteSpace(item.AssignedBedOrZone))
+                                    {
+                                        <span class="badge bg-light text-dark border">
+                                            <i class="bi bi-geo-alt me-1"></i>@item.AssignedBedOrZone
+                                        </span>
+                                    }
+                                    else
+                                    {
+                                        <span class="text-muted small">Atanmadı</span>
+                                    }
+                                </td>
+                                <td>@GetStatusBadge(item.Status)</td>
+                                <td>
+                                    <span class="badge @GetWaitTimeBadgeClass(item.WaitingMinutes)">
+                                        <i class="bi bi-clock me-1"></i>@item.WaitingMinutes dk
+                                    </span>
+                                    @if (item.DoctorWaitingMinutes.HasValue && item.Status == "TriagedWaitingDoctor")
+                                    {
+                                        <small class="text-muted d-block mt-1">Hekim: @item.DoctorWaitingMinutes dk</small>
+                                    }
+                                </td>
+                                <td class="text-end">
+                                    <div class="btn-group btn-group-sm">
+                                        @if (item.Status is "WaitingTriage" or "TriagedWaitingDoctor" or "InEvaluation")
+                                        {
+                                            <button class="btn btn-outline-warning" @onclick="() => OpenTriageModal(item.AdmissionId)" title="Triyaj Gir/Güncelle">
+                                                <i class="bi bi-heart-pulse"></i>
+                                            </button>
+                                        }
+                                        @if (item.Status is "TriagedWaitingDoctor" or "InEvaluation" or "InObservation")
+                                        {
+                                            <a href="emergency/encounter/@item.AdmissionId" class="btn btn-outline-danger" title="Klinik İstem &amp; Encounter">
+                                                <i class="bi bi-card-checklist"></i>
+                                            </a>
+                                            <button class="btn btn-outline-info" @onclick="() => OpenAssignModal(item.AdmissionId)" title="Hekim/Alan Ata">
+                                                <i class="bi bi-person-badge"></i>
+                                            </button>
+                                            <button class="btn btn-outline-primary" @onclick="() => OpenStatusModal(item.AdmissionId)" title="Durum Güncelle">
+                                                <i class="bi bi-arrow-right-circle"></i>
+                                            </button>
+                                        }
+                                    </div>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </div>
+</div>
+
+<!-- Modal 1: Triyaj Kaydı -->
+@if (_showTriageModal)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal-dialog modal-lg modal-dialog-centered">
+            <div class="modal-content border-0 shadow">
+                <div class="modal-header bg-warning text-dark">
+                    <h5 class="modal-title"><i class="bi bi-heart-pulse me-2"></i>Triyaj Kaydı ve Değerlendirme</h5>
+                    <button type="button" class="btn-close" @onclick="() => _showTriageModal = false"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="alert alert-info py-2 mb-3">
+                        <i class="bi bi-info-circle-fill me-2"></i>
+                        <strong>Eğitim Sınıflandırması:</strong> Sistem otomatik tıbbi karar vermez; triyaj kategorisi insan/sağlık personeli seçimidir.
+                    </div>
+
+                    <div class="row g-3 mb-3">
+                        <div class="col-md-6">
+                            <label class="form-label fw-bold">Triyaj Seviyesi <span class="text-danger">*</span></label>
+                            <select class="form-select" @bind="_triageRequest.TriageLevel">
+                                <option value="Red1Resuscitation">🔴 Kırmızı 1 (Resüsitasyon - 0 dk)</option>
+                                <option value="Red2Emergency">🔴 Kırmızı 2 (Çok Acil - &lt;10 dk)</option>
+                                <option value="YellowUrgent">🟡 Sarı (Acil - &lt;60 dk)</option>
+                                <option value="GreenStandard">🟢 Yeşil (Standart - &lt;120 dk)</option>
+                                <option value="BlackExpectant">⚫ Siyah (Ekspektan)</option>
+                            </select>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label fw-bold">Bilinç Durumu (AVPU)</label>
+                            <select class="form-select" @bind="_triageRequest.Consciousness">
+                                <option value="Alert">Alert (Açık)</option>
+                                <option value="Voice">Voice (Sözlü Uyarana Yanıt)</option>
+                                <option value="Pain">Pain (Ağrılı Uyarana Yanıt)</option>
+                                <option value="Unresponsive">Unresponsive (Yanıtsız)</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">Triyaj Gerekçesi <span class="text-danger">*</span></label>
+                        <input type="text" class="form-control" @bind="_triageRequest.TriageCategoryReason"
+                               placeholder="Örn: Akut göğüs ağrısı, taşikardi mevcut." />
+                    </div>
+
+                    <h6 class="fw-bold border-bottom pb-2 mt-4"><i class="bi bi-activity me-1"></i>Vital Bulgular</h6>
+                    <div class="row g-3">
+                        <div class="col-md-3 col-6">
+                            <label class="form-label small">Sistolik KB</label>
+                            <input type="number" class="form-control" @bind="_triageRequest.SystolicBp" placeholder="120" />
+                        </div>
+                        <div class="col-md-3 col-6">
+                            <label class="form-label small">Diyastolik KB</label>
+                            <input type="number" class="form-control" @bind="_triageRequest.DiastolicBp" placeholder="80" />
+                        </div>
+                        <div class="col-md-3 col-6">
+                            <label class="form-label small">Nabız (bpm)</label>
+                            <input type="number" class="form-control" @bind="_triageRequest.HeartRate" placeholder="75" />
+                        </div>
+                        <div class="col-md-3 col-6">
+                            <label class="form-label small">Ateş (°C)</label>
+                            <input type="number" step="0.1" class="form-control" @bind="_triageRequest.BodyTemperatureCelsius" placeholder="36.5" />
+                        </div>
+                        <div class="col-md-3 col-6">
+                            <label class="form-label small">Solunum (dk)</label>
+                            <input type="number" class="form-control" @bind="_triageRequest.RespiratoryRate" placeholder="16" />
+                        </div>
+                        <div class="col-md-3 col-6">
+                            <label class="form-label small">SpO2 (%)</label>
+                            <input type="number" class="form-control" @bind="_triageRequest.OxygenSaturationPercent" placeholder="98" />
+                        </div>
+                        <div class="col-md-3 col-6">
+                            <label class="form-label small">Ağrı Skoru (0-10)</label>
+                            <input type="number" min="0" max="10" class="form-control" @bind="_triageRequest.PainScale" placeholder="3" />
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer bg-light">
+                    <button type="button" class="btn btn-secondary" @onclick="() => _showTriageModal = false">Vazgeç</button>
+                    <button type="button" class="btn btn-warning text-dark fw-bold" @onclick="SubmitTriageAsync" disabled="@_isSubmitting">
+                        @if (_isSubmitting)
+                        {
+                            <span class="spinner-border spinner-border-sm me-1"></span>
+                        }
+                        Triyajı Onayla
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+<!-- Modal 2: Hekim / Alan Ata -->
+@if (_showAssignModal)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content border-0 shadow">
+                <div class="modal-header bg-info text-white">
+                    <h5 class="modal-title"><i class="bi bi-person-badge me-2"></i>Hekim &amp; Alan Atama</h5>
+                    <button type="button" class="btn-close btn-close-white" @onclick="() => _showAssignModal = false"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">Sorumlu Hekim ID</label>
+                        <input type="text" class="form-control font-monospace" @bind="_assignRequest.DoctorId" />
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">Acil Alanı / Yatak</label>
+                        <input type="text" class="form-control" @bind="_assignRequest.BedOrZone"
+                               placeholder="Örn: Sarı Alan - Yatak 2, Kırmızı Alan - Resüsitasyon 1" />
+                    </div>
+                </div>
+                <div class="modal-footer bg-light">
+                    <button type="button" class="btn btn-secondary" @onclick="() => _showAssignModal = false">Vazgeç</button>
+                    <button type="button" class="btn btn-info text-white" @onclick="SubmitAssignAsync" disabled="@_isSubmitting">
+                        @if (_isSubmitting)
+                        {
+                            <span class="spinner-border spinner-border-sm me-1"></span>
+                        }
+                        Atamayı Tamamla
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+<!-- Modal 3: Durum Güncelle -->
+@if (_showStatusModal)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content border-0 shadow">
+                <div class="modal-header bg-primary text-white">
+                    <h5 class="modal-title"><i class="bi bi-arrow-right-circle me-2"></i>Durum Güncelle</h5>
+                    <button type="button" class="btn-close btn-close-white" @onclick="() => _showStatusModal = false"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">Yeni Durum</label>
+                        <select class="form-select" @bind="_statusRequest.Status">
+                            <option value="InEvaluation">Değerlendirmede (InEvaluation)</option>
+                            <option value="InObservation">Gözlemde (InObservation)</option>
+                            <option value="AdmittedToInpatient">Servise Yatış (AdmittedToInpatient)</option>
+                            <option value="AdmittedToIcu">Yoğun Bakıma Yatış (AdmittedToIcu)</option>
+                            <option value="Discharged">Taburcu Edildi (Discharged)</option>
+                            <option value="TransferredOut">Dış Merkeze Sevk (TransferredOut)</option>
+                            <option value="LeftWithoutBeingSeen">Haber Vermeden Ayrıldı (LeftWithoutBeingSeen)</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Notlar</label>
+                        <textarea class="form-control" rows="3" @bind="_statusRequest.Notes"></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer bg-light">
+                    <button type="button" class="btn btn-secondary" @onclick="() => _showStatusModal = false">Vazgeç</button>
+                    <button type="button" class="btn btn-primary" @onclick="SubmitStatusAsync" disabled="@_isSubmitting">
+                        @if (_isSubmitting)
+                        {
+                            <span class="spinner-border spinner-border-sm me-1"></span>
+                        }
+                        Güncelle
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private bool _isLoading = true;
+    private bool _isSubmitting;
+    private string? _errorMessage;
+    private string? _successMessage;
+
+    private EmergencyBoardSummaryResponse? _summary;
+    private List<EmergencyBoardWorklistItemResponse> _worklist = [];
+
+    private string? _selectedTriageFilter;
+    private string? _selectedStatusFilter;
+    private string? _selectedZoneFilter;
+    private string? _searchQuery;
+
+    private HubConnection? _hubConnection;
+
+    private bool _showTriageModal;
+    private bool _showAssignModal;
+    private bool _showStatusModal;
+    private Guid _targetAdmissionId;
+
+    private RecordTriageRequest _triageRequest = new();
+    private AssignEmergencyDoctorRequest _assignRequest = new();
+    private UpdateEmergencyAdmissionStatusRequest _statusRequest = new();
+
+    private List<EmergencyBoardWorklistItemResponse> FilteredWorklist
+    {
+        get
+        {
+            var list = _worklist.AsEnumerable();
+
+            if (!string.IsNullOrWhiteSpace(_selectedTriageFilter))
+            {
+                list = list.Where(i => i.TriageLevel == _selectedTriageFilter);
+            }
+
+            if (!string.IsNullOrWhiteSpace(_selectedStatusFilter))
+            {
+                list = list.Where(i => i.Status == _selectedStatusFilter);
+            }
+
+            if (!string.IsNullOrWhiteSpace(_selectedZoneFilter))
+            {
+                list = list.Where(i => i.AssignedBedOrZone != null && i.AssignedBedOrZone.Contains(_selectedZoneFilter, StringComparison.OrdinalIgnoreCase));
+            }
+
+            if (!string.IsNullOrWhiteSpace(_searchQuery))
+            {
+                var q = _searchQuery.Trim();
+                list = list.Where(i => i.EmergencyProtocolNumber.Contains(q, StringComparison.OrdinalIgnoreCase)
+                                    || i.ChiefComplaint.Contains(q, StringComparison.OrdinalIgnoreCase));
+            }
+
+            return list.ToList();
+        }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadBoardDataAsync();
+        await StartSignalRAsync();
+    }
+
+    private async Task LoadBoardDataAsync()
+    {
+        _isLoading = true;
+        _errorMessage = null;
+        try
+        {
+            _summary = await EmergencyApi.GetBoardSummaryAsync();
+            _worklist = await EmergencyApi.GetBoardWorklistAsync();
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"Pano verileri yüklenirken hata: {ex.Message}";
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+    }
+
+    private async Task StartSignalRAsync()
+    {
+        try
+        {
+            _hubConnection = new HubConnectionBuilder()
+                .WithUrl(Navigation.ToAbsoluteUri("/hubs/hospital"))
+                .WithAutomaticReconnect()
+                .Build();
+
+            _hubConnection.On("EmergencyAdmissionCreated", async () => await InvokeAsync(async () =>
+            {
+                await LoadBoardDataAsync();
+                StateHasChanged();
+            }));
+
+            _hubConnection.On("EmergencyTriageRecorded", async () => await InvokeAsync(async () =>
+            {
+                await LoadBoardDataAsync();
+                StateHasChanged();
+            }));
+
+            _hubConnection.On("EmergencyDoctorAssigned", async () => await InvokeAsync(async () =>
+            {
+                await LoadBoardDataAsync();
+                StateHasChanged();
+            }));
+
+            _hubConnection.On("EmergencyStatusChanged", async () => await InvokeAsync(async () =>
+            {
+                await LoadBoardDataAsync();
+                StateHasChanged();
+            }));
+
+            _hubConnection.On("EmergencyDashboardUpdated", async () => await InvokeAsync(async () =>
+            {
+                await LoadBoardDataAsync();
+                StateHasChanged();
+            }));
+
+            await _hubConnection.StartAsync();
+        }
+        catch
+        {
+            // Fallback to polling or manual refresh if SignalR connection fails in certain environments
+        }
+    }
+
+    private void SetTriageFilter(string? triage)
+    {
+        _selectedTriageFilter = _selectedTriageFilter == triage ? null : triage;
+    }
+
+    private void ClearFilters()
+    {
+        _selectedTriageFilter = null;
+        _selectedStatusFilter = null;
+        _selectedZoneFilter = null;
+        _searchQuery = null;
+    }
+
+    private void OpenTriageModal(Guid id)
+    {
+        _targetAdmissionId = id;
+        _triageRequest = new RecordTriageRequest
+        {
+            TriageLevel = "YellowUrgent",
+            Consciousness = "Alert",
+        };
+        _showTriageModal = true;
+    }
+
+    private void OpenAssignModal(Guid id)
+    {
+        _targetAdmissionId = id;
+        _assignRequest = new AssignEmergencyDoctorRequest
+        {
+            DoctorId = Guid.Parse("00000000-0000-0000-0000-000000000102"),
+        };
+        _showAssignModal = true;
+    }
+
+    private void OpenStatusModal(Guid id)
+    {
+        _targetAdmissionId = id;
+        _statusRequest = new UpdateEmergencyAdmissionStatusRequest
+        {
+            Status = "InObservation",
+        };
+        _showStatusModal = true;
+    }
+
+    private async Task SubmitTriageAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_triageRequest.TriageCategoryReason))
+        {
+            _errorMessage = "Lütfen triyaj gerekçesini belirtin.";
+            return;
+        }
+
+        _isSubmitting = true;
+        _errorMessage = null;
+        try
+        {
+            var result = await EmergencyApi.RecordTriageAsync(_targetAdmissionId, _triageRequest);
+            if (result != null)
+            {
+                _successMessage = "Triyaj başarıyla kaydedildi.";
+                _showTriageModal = false;
+                await LoadBoardDataAsync();
+            }
+            else
+            {
+                _errorMessage = "Triyaj kaydedilemedi.";
+            }
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"Triyaj kaydetme hatası: {ex.Message}";
+        }
+        finally
+        {
+            _isSubmitting = false;
+        }
+    }
+
+    private async Task SubmitAssignAsync()
+    {
+        _isSubmitting = true;
+        _errorMessage = null;
+        try
+        {
+            var result = await EmergencyApi.AssignDoctorAsync(_targetAdmissionId, _assignRequest);
+            if (result != null)
+            {
+                _successMessage = "Hekim ve alan atandı.";
+                _showAssignModal = false;
+                await LoadBoardDataAsync();
+            }
+            else
+            {
+                _errorMessage = "Atama yapılamadı.";
+            }
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"Atama hatası: {ex.Message}";
+        }
+        finally
+        {
+            _isSubmitting = false;
+        }
+    }
+
+    private async Task SubmitStatusAsync()
+    {
+        _isSubmitting = true;
+        _errorMessage = null;
+        try
+        {
+            var result = await EmergencyApi.UpdateStatusAsync(_targetAdmissionId, _statusRequest);
+            if (result != null)
+            {
+                _successMessage = "Durum güncellendi.";
+                _showStatusModal = false;
+                await LoadBoardDataAsync();
+            }
+            else
+            {
+                _errorMessage = "Durum güncellenemedi.";
+            }
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"Durum güncelleme hatası: {ex.Message}";
+        }
+        finally
+        {
+            _isSubmitting = false;
+        }
+    }
+
+    private static string GetRowHighlightClass(string? triageLevel) =>
+        triageLevel switch
+        {
+            "Red1Resuscitation" or "Red1_Resuscitation" => "table-danger",
+            "Red2Emergency" or "Red2_Emergency" => "table-danger",
+            "YellowUrgent" or "Yellow_Urgent" => "table-warning",
+            _ => string.Empty,
+        };
+
+    private static string GetWaitTimeBadgeClass(int minutes) =>
+        minutes switch
+        {
+            > 60 => "bg-danger text-white",
+            > 30 => "bg-warning text-dark",
+            _ => "bg-success-subtle text-success border border-success",
+        };
+
+    private static RenderFragment GetTriageLevelBadge(string? level) => builder =>
+    {
+        var (css, label) = level switch
+        {
+            "Red1Resuscitation" or "Red1_Resuscitation" => ("bg-danger text-white", "🔴 Kırmızı 1"),
+            "Red2Emergency" or "Red2_Emergency" => ("bg-danger text-white", "🔴 Kırmızı 2"),
+            "YellowUrgent" or "Yellow_Urgent" => ("bg-warning text-dark", "🟡 Sarı"),
+            "GreenStandard" or "Green_Standard" => ("bg-success text-white", "🟢 Yeşil"),
+            "BlackExpectant" or "Black_Expectant" => ("bg-dark text-white", "⚫ Siyah"),
+            _ => ("bg-secondary-subtle text-secondary border", "Bekliyor"),
+        };
+
+        builder.OpenElement(0, "span");
+        builder.AddAttribute(1, "class", $"badge {css}");
+        builder.AddContent(2, label);
+        builder.CloseElement();
+    };
+
+    private static RenderFragment GetArrivalBadge(string arrivalType) => builder =>
+    {
+        var (css, text) = arrivalType switch
+        {
+            "Ambulance" => ("bg-danger-subtle text-danger border border-danger", "112 Ambulans"),
+            "TransferFromOtherFacility" => ("bg-info-subtle text-info border border-info", "Dış Sevk"),
+            _ => ("bg-light text-dark border", "Ayaktan"),
+        };
+
+        builder.OpenElement(0, "span");
+        builder.AddAttribute(1, "class", $"badge {css}");
+        builder.AddContent(2, text);
+        builder.CloseElement();
+    };
+
+    private static RenderFragment GetStatusBadge(string status) => builder =>
+    {
+        var (css, label) = status switch
+        {
+            "WaitingTriage" => ("bg-warning-subtle text-warning-emphasis border border-warning", "Triyaj Bekliyor"),
+            "TriagedWaitingDoctor" => ("bg-info-subtle text-info-emphasis border border-info", "Hekim Bekliyor"),
+            "InEvaluation" => ("bg-primary-subtle text-primary border border-primary", "Değerlendirmede"),
+            "InObservation" => ("bg-secondary-subtle text-secondary border border-secondary", "Gözlemde"),
+            _ => ("bg-light text-dark", status),
+        };
+
+        builder.OpenElement(0, "span");
+        builder.AddAttribute(1, "class", $"badge {css}");
+        builder.AddContent(2, label);
+        builder.CloseElement();
+    };
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_hubConnection is not null)
+        {
+            await _hubConnection.DisposeAsync();
+        }
+    }
+}

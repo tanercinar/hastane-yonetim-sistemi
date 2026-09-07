@@ -1,0 +1,519 @@
+@page "/pharmacy/worklist"
+@using HospitalManagement.Contracts.Pharmacy
+@using HospitalManagement.Web.Client.Identity
+@using HospitalManagement.Web.Client.Pharmacy
+@inject IPharmacyApiClient PharmacyApi
+@inject UserSessionState SessionState
+@inject NavigationManager Navigation
+
+<PageTitle>Eczane İş Listesi — Hastane Yönetim Sistemi</PageTitle>
+
+<header class="page-heading" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: var(--hys-space-3);">
+    <div>
+        <span class="page-eyebrow">Eczane ve İlaç Dağıtımı</span>
+        <h1 class="page-title">Eczane İş Listesi</h1>
+        <p class="page-subtitle">İmzalı ve geçerli reçeteleri listeleyin, reçete kalemlerini inceleyin ve ilaç teslim süreçlerini yönetin.</p>
+    </div>
+    <div>
+        <span class="ui-badge ui-badge--primary" style="font-size: 0.875rem; padding: 6px 12px; border-radius: var(--hys-radius-md);">
+            Eczacı Portalı
+        </span>
+    </div>
+</header>
+
+@if (_isLoading)
+{
+    <LoadingState />
+}
+else if (_isForbidden)
+{
+    <ForbiddenState ActionText="Genel Bakışa Dön" ActionHref="/" />
+}
+else
+{
+    <div style="display: flex; flex-direction: column; gap: var(--hys-space-4);">
+        @if (!string.IsNullOrWhiteSpace(_errorMessage))
+        {
+            <div class="ui-state ui-state--danger" role="alert" style="padding: var(--hys-space-3); border-radius: var(--hys-radius-md); background: #fee2e2; color: #991b1b;">
+                @_errorMessage
+            </div>
+        }
+
+        @if (!string.IsNullOrWhiteSpace(_successMessage))
+        {
+            <div class="ui-state ui-state--success" role="alert" style="padding: var(--hys-space-3); border-radius: var(--hys-radius-md); background: #dcfce7; color: #166534;">
+                @_successMessage
+            </div>
+        }
+
+        <!-- Filtre ve Arama Paneli -->
+        <section class="ui-panel" style="background: var(--hys-color-surface); border: 1px solid var(--hys-color-border); border-radius: var(--hys-radius-lg); padding: var(--hys-space-4);">
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: var(--hys-space-3); align-items: flex-end;">
+                <div>
+                    <label class="ui-label" for="statusFilter">Reçete Durumu</label>
+                    <select id="statusFilter" class="ui-input" @bind="_selectedStatus">
+                        <option value="">Aktif Reçeteler (İmzalı + Kısmi)</option>
+                        <option value="Signed">Yalnız İmzalı (Signed)</option>
+                        <option value="PartiallyDispensed">Kısmen Karşılanan</option>
+                        <option value="Dispensed">Tamamı Karşılanan</option>
+                        <option value="Cancelled">İptal Edilen</option>
+                        <option value="All">Tüm Reçeteler</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="ui-label" for="rxNumberFilter">Reçete Numarası</label>
+                    <input id="rxNumberFilter" type="text" class="ui-input" @bind="_rxNumberQuery" placeholder="Örn: DEMO-RX-..." />
+                </div>
+                <div>
+                    <button class="ui-button ui-button--primary" type="button" @onclick="LoadWorklistAsync" style="width: 100%;">
+                        Filtrele / Yenile
+                    </button>
+                </div>
+            </div>
+        </section>
+
+        <!-- İş Listesi Tablosu -->
+        <section class="ui-panel" style="background: var(--hys-color-surface); border: 1px solid var(--hys-color-border); border-radius: var(--hys-radius-lg); padding: var(--hys-space-4);">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--hys-space-3);">
+                <h2 style="font-size: 1.125rem; font-weight: 600;">Bekleyen Reçeteler (@(_worklist?.Count ?? 0))</h2>
+            </div>
+
+            @if (_worklist is null || _worklist.Count == 0)
+            {
+                <EmptyState Title="Kayıt Bulunamadı" Description="Seçilen filtre kriterlerine uygun reçete bulunmamaktadır." />
+            }
+            else
+            {
+                <div style="overflow-x: auto;">
+                    <table class="ui-table" style="width: 100%; border-collapse: collapse; text-align: left;">
+                        <thead>
+                            <tr style="background: var(--hys-color-bg); border-bottom: 1px solid var(--hys-color-border);">
+                                <th style="padding: var(--hys-space-3);">Reçete No</th>
+                                <th style="padding: var(--hys-space-3);">Hasta ID</th>
+                                <th style="padding: var(--hys-space-3);">Kalem Sayısı</th>
+                                <th style="padding: var(--hys-space-3);">Durum</th>
+                                <th style="padding: var(--hys-space-3);">İmza Tarihi</th>
+                                <th style="padding: var(--hys-space-3);">Geçerlilik Bitiş</th>
+                                <th style="padding: var(--hys-space-3); width: 110px;">Eylem</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var item in _worklist)
+                            {
+                                <tr style="border-bottom: 1px solid var(--hys-color-border);">
+                                    <td style="padding: var(--hys-space-3); font-weight: 600; color: var(--hys-color-primary);">
+                                        @item.PrescriptionNumber
+                                    </td>
+                                    <td style="padding: var(--hys-space-3); font-family: monospace; font-size: 0.8125rem;">
+                                        @item.PatientId.ToString()[..8]...
+                                    </td>
+                                    <td style="padding: var(--hys-space-3);">
+                                        @item.ItemCount kalem
+                                    </td>
+                                    <td style="padding: var(--hys-space-3);">
+                                        <span class="ui-badge @GetStatusBadgeClass(item.Status)">
+                                            @GetStatusDisplayText(item.Status)
+                                        </span>
+                                    </td>
+                                    <td style="padding: var(--hys-space-3); font-size: 0.875rem;">
+                                        @(item.SignedAtUtc?.ToLocalTime().ToString("dd.MM.yyyy HH:mm") ?? "-")
+                                    </td>
+                                    <td style="padding: var(--hys-space-3); font-size: 0.875rem;">
+                                        @(item.ValidUntilUtc?.ToLocalTime().ToString("dd.MM.yyyy") ?? "-")
+                                    </td>
+                                    <td style="padding: var(--hys-space-3);">
+                                        <button class="ui-button ui-button--secondary" type="button" style="padding: 4px 8px; font-size: 0.75rem;" @onclick="() => OpenDetailModalAsync(item.Id)">
+                                            İncele
+                                        </button>
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </section>
+    </div>
+}
+
+<!-- Reçete Detay Modalı (Klinik İzolasyonlu) -->
+@if (_selectedPrescription is not null && !_isDispenseModalOpen)
+{
+    <div style="position: fixed; inset: 0; background: rgba(0, 0, 0, 0.5); display: flex; align-items: center; justify-content: center; z-index: 9999; padding: var(--hys-space-3);">
+        <div style="background: var(--hys-color-surface); border-radius: var(--hys-radius-lg); width: 100%; max-width: 760px; max-height: 90vh; overflow-y: auto; padding: var(--hys-space-5); display: flex; flex-direction: column; gap: var(--hys-space-4);">
+            <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--hys-color-border); padding-bottom: var(--hys-space-3);">
+                <div>
+                    <h3 style="font-size: 1.25rem; font-weight: 700;">Reçete Detayı: @_selectedPrescription.PrescriptionNumber</h3>
+                    <div style="font-size: 0.8125rem; color: var(--hys-color-muted);">Hasta doğrulama kimliği: @_selectedPrescription.PatientId</div>
+                </div>
+                <span class="ui-badge @GetStatusBadgeClass(_selectedPrescription.Status)" style="font-size: 0.875rem; padding: 4px 10px;">
+                    @GetStatusDisplayText(_selectedPrescription.Status)
+                </span>
+            </div>
+
+            <!-- Klinik Bilgi İzolasyonu Açıklaması -->
+            <div style="padding: var(--hys-space-2) var(--hys-space-3); border-radius: var(--hys-radius-md); background: #f0fdf4; border-left: 3px solid #16a34a; font-size: 0.75rem; color: #166534;">
+                <strong>Klinik İzolasyon Uyumu:</strong> Eczacı görünümü yalnızca hasta doğrulama kimliği, reçete kalemleri ve kullanım talimatlarını içerir. Tanı, düzeltme gerekçeleri ve karşılaşma notları bu ekrandan izole edilmiştir.
+            </div>
+
+            @if (!string.IsNullOrWhiteSpace(_selectedPrescription.GeneralInstructions))
+            {
+                <div>
+                    <span style="font-weight: 600; font-size: 0.875rem;">Genel Hasta Talimatı:</span>
+                    <span style="font-size: 0.875rem; color: var(--hys-color-text);">@_selectedPrescription.GeneralInstructions</span>
+                </div>
+            }
+
+            <!-- Kalem Listesi -->
+            <div style="overflow-x: auto; border: 1px solid var(--hys-color-border); border-radius: var(--hys-radius-md);">
+                <table class="ui-table" style="width: 100%; border-collapse: collapse; font-size: 0.875rem;">
+                    <thead>
+                        <tr style="background: var(--hys-color-bg); border-bottom: 1px solid var(--hys-color-border);">
+                            <th style="padding: var(--hys-space-2);">İlaç / Etken Madde</th>
+                            <th style="padding: var(--hys-space-2);">Doz / Sıklık</th>
+                            <th style="padding: var(--hys-space-2);">Reçete Edilen</th>
+                            <th style="padding: var(--hys-space-2);">Teslim Edilen</th>
+                            <th style="padding: var(--hys-space-2);">Kalan</th>
+                            <th style="padding: var(--hys-space-2);">Durum</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var item in _selectedPrescription.Items)
+                        {
+                            var remaining = item.Quantity - item.DispensedQuantity;
+                            <tr style="border-bottom: 1px solid var(--hys-color-border);">
+                                <td style="padding: var(--hys-space-2);">
+                                    <div style="font-weight: 600;">@item.BrandName</div>
+                                    <div style="font-size: 0.75rem; color: var(--hys-color-muted);">@item.GenericName (@item.MedicationCode)</div>
+                                    @if (!string.IsNullOrWhiteSpace(item.Instructions))
+                                    {
+                                        <div style="font-size: 0.75rem; color: #475569; font-style: italic;">Talimat: @item.Instructions</div>
+                                    }
+                                </td>
+                                <td style="padding: var(--hys-space-2);">
+                                    @item.Dose @item.DoseUnit - @item.Frequency (@item.DurationDays gün)
+                                </td>
+                                <td style="padding: var(--hys-space-2); font-weight: 600;">
+                                    @item.Quantity @item.QuantityUnit
+                                </td>
+                                <td style="padding: var(--hys-space-2); color: #166534; font-weight: 600;">
+                                    @item.DispensedQuantity @item.QuantityUnit
+                                </td>
+                                <td style="padding: var(--hys-space-2); color: @(remaining > 0 ? "#b45309" : "#166534"); font-weight: 600;">
+                                    @remaining @item.QuantityUnit
+                                </td>
+                                <td style="padding: var(--hys-space-2);">
+                                    @if (item.IsFullyDispensed)
+                                    {
+                                        <span class="ui-badge ui-badge--success">Verildi</span>
+                                    }
+                                    else if (item.DispensedQuantity > 0)
+                                    {
+                                        <span class="ui-badge ui-badge--warning">Kısmi</span>
+                                    }
+                                    else
+                                    {
+                                        <span class="ui-badge ui-badge--secondary">Bekliyor</span>
+                                    }
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+
+            <div style="display: flex; justify-content: flex-end; gap: var(--hys-space-3); margin-top: var(--hys-space-2);">
+                <button class="ui-button ui-button--secondary" type="button" @onclick="() => _selectedPrescription = null">Kapat</button>
+                @if (CanBeDispensed(_selectedPrescription))
+                {
+                    <button class="ui-button ui-button--primary" type="button" @onclick="OpenDispenseModalAsync">
+                        İlaç Teslim Et
+                    </button>
+                }
+            </div>
+        </div>
+    </div>
+}
+
+<!-- İlaç Teslim (Dispense & FEFO Lot Seçim) Modalı -->
+@if (_isDispenseModalOpen && _selectedPrescription is not null)
+{
+    <div style="position: fixed; inset: 0; background: rgba(0, 0, 0, 0.5); display: flex; align-items: center; justify-content: center; z-index: 10000; padding: var(--hys-space-3);">
+        <div style="background: var(--hys-color-surface); border-radius: var(--hys-radius-lg); width: 100%; max-width: 800px; max-height: 90vh; overflow-y: auto; padding: var(--hys-space-5); display: flex; flex-direction: column; gap: var(--hys-space-4);">
+            <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--hys-color-border); padding-bottom: var(--hys-space-3);">
+                <div>
+                    <h3 style="font-size: 1.25rem; font-weight: 700;">İlaç Teslimi / Karşılama</h3>
+                    <div style="font-size: 0.8125rem; color: var(--hys-color-muted);">Reçete: @_selectedPrescription.PrescriptionNumber | Hasta ID: @_selectedPrescription.PatientId</div>
+                </div>
+                <span class="ui-badge ui-badge--primary" style="font-size: 0.8125rem;">FEFO Doğrulamalı Stok</span>
+            </div>
+
+            @if (!string.IsNullOrWhiteSpace(_dispenseError))
+            {
+                <div class="ui-state ui-state--danger" role="alert" style="padding: var(--hys-space-3); border-radius: var(--hys-radius-md); background: #fee2e2; color: #991b1b;">
+                    @_dispenseError
+                </div>
+            }
+
+            <div style="font-size: 0.875rem; color: var(--hys-color-muted);">
+                Teslim edilecek kalemler için uygun parti/lot seçimini yapınız. Sistem en yakın miatlı lotu (FEFO kuralı) otomatik olarak ilk sırada önerir.
+            </div>
+
+            <div style="display: flex; flex-direction: column; gap: var(--hys-space-4);">
+                @foreach (var line in _dispenseLines)
+                {
+                    <div style="border: 1px solid var(--hys-color-border); border-radius: var(--hys-radius-md); padding: var(--hys-space-3); background: var(--hys-color-bg);">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--hys-space-2);">
+                            <div>
+                                <span style="font-weight: 700;">@line.Item.BrandName</span>
+                                <span style="font-size: 0.8125rem; color: var(--hys-color-muted);"> (@line.Item.GenericName)</span>
+                            </div>
+                            <span style="font-size: 0.8125rem; font-weight: 600; color: #b45309;">
+                                Kalan İhtiyaç: @(line.Item.Quantity - line.Item.DispensedQuantity) @line.Item.QuantityUnit
+                            </span>
+                        </div>
+
+                        <div style="display: grid; grid-template-columns: 2fr 1fr; gap: var(--hys-space-3); align-items: flex-end;">
+                            <div>
+                                <label class="ui-label" style="font-size: 0.8125rem;">Stok Partisi / Lot Seçimi (FEFO)</label>
+                                <select class="ui-input" @bind="line.SelectedStockItemId" style="font-size: 0.8125rem;">
+                                    @if (line.Candidates.Count == 0)
+                                    {
+                                        <option value="">(Stokta Kullanılabilir Lot Yok)</option>
+                                    }
+                                    else
+                                    {
+                                        @foreach (var cand in line.Candidates)
+                                        {
+                                            <option value="@cand.StockItemId">
+                                                Lot: @cand.LotNumber | Miktar: @cand.QuantityAvailable | Miat: @cand.ExpirationDateUtc.ToString("dd.MM.yyyy") (@cand.DaysUntilExpiration gün kaldı)
+                                            </option>
+                                        }
+                                    }
+                                </select>
+                            </div>
+                            <div>
+                                <label class="ui-label" style="font-size: 0.8125rem;">Teslim Miktarı (@line.Item.QuantityUnit)</label>
+                                <input type="number" class="ui-input" min="0" max="@(line.Item.Quantity - line.Item.DispensedQuantity)" @bind="line.QuantityToDispense" style="font-size: 0.8125rem;" />
+                            </div>
+                        </div>
+                    </div>
+                }
+            </div>
+
+            <div style="display: flex; justify-content: flex-end; gap: var(--hys-space-3); margin-top: var(--hys-space-3); border-top: 1px solid var(--hys-color-border); padding-top: var(--hys-space-3);">
+                <button class="ui-button ui-button--secondary" type="button" @onclick="() => _isDispenseModalOpen = false" disabled="@_isSubmittingDispense">Vazgeç</button>
+                <button class="ui-button ui-button--primary" type="button" @onclick="SubmitDispenseAsync" disabled="@_isSubmittingDispense">
+                    @(_isSubmittingDispense ? "İşleniyor..." : "Teslimi Onayla ve Stoktan Düş")
+                </button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private bool _isLoading = true;
+    private bool _isForbidden;
+    private string? _errorMessage;
+    private string? _successMessage;
+
+    private string _selectedStatus = string.Empty;
+    private string _rxNumberQuery = string.Empty;
+
+    private List<PrescriptionSummaryResponse>? _worklist;
+    private PrescriptionDetailResponse? _selectedPrescription;
+
+    private bool _isDispenseModalOpen;
+    private bool _isSubmittingDispense;
+    private string? _dispenseError;
+    private List<DispenseLineModel> _dispenseLines = [];
+    private Guid _dispenseIdempotencyKey;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await SessionState.EnsureLoadedAsync();
+
+        if (!SessionState.IsAuthenticated)
+        {
+            Navigation.NavigateTo("account/login");
+            return;
+        }
+
+        if (!SessionState.IsPharmacist)
+        {
+            _isForbidden = true;
+            _isLoading = false;
+            return;
+        }
+
+        await LoadWorklistAsync();
+    }
+
+    private async Task LoadWorklistAsync()
+    {
+        _isLoading = true;
+        _errorMessage = null;
+
+        try
+        {
+            var res = await PharmacyApi.GetPrescriptionWorklistAsync(
+                status: string.IsNullOrWhiteSpace(_selectedStatus) ? null : _selectedStatus,
+                prescriptionNumber: string.IsNullOrWhiteSpace(_rxNumberQuery) ? null : _rxNumberQuery);
+
+            _worklist = res?.ToList() ?? [];
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"İş listesi yüklenirken hata oluştu: {ex.Message}";
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+    }
+
+    private async Task OpenDetailModalAsync(Guid prescriptionId)
+    {
+        _errorMessage = null;
+        _successMessage = null;
+        try
+        {
+            var details = await PharmacyApi.GetPrescriptionByIdAsync(prescriptionId);
+            if (details is not null)
+            {
+                _selectedPrescription = details;
+            }
+            else
+            {
+                _errorMessage = "Reçete detayları yüklenemedi.";
+            }
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"Detay yükleme hatası: {ex.Message}";
+        }
+    }
+
+    private async Task OpenDispenseModalAsync()
+    {
+        if (_selectedPrescription is null) return;
+
+        _dispenseError = null;
+        _dispenseLines.Clear();
+        _dispenseIdempotencyKey = Guid.NewGuid();
+
+        foreach (var item in _selectedPrescription.Items)
+        {
+            var remaining = item.Quantity - item.DispensedQuantity;
+            if (remaining > 0)
+            {
+                var candidates = await PharmacyApi.GetFefoCandidatesAsync(item.MedicationCatalogItemId) ?? [];
+                var firstLot = candidates.FirstOrDefault()?.StockItemId ?? Guid.Empty;
+
+                _dispenseLines.Add(new DispenseLineModel
+                {
+                    Item = item,
+                    Candidates = candidates.ToList(),
+                    SelectedStockItemId = firstLot,
+                    QuantityToDispense = remaining,
+                });
+            }
+        }
+
+        _isDispenseModalOpen = true;
+    }
+
+    private async Task SubmitDispenseAsync()
+    {
+        if (_selectedPrescription is null) return;
+
+        _dispenseError = null;
+        var validItems = _dispenseLines
+            .Where(l => l.QuantityToDispense > 0 && l.SelectedStockItemId != Guid.Empty)
+            .Select(l => new DispensePrescriptionItemRequest
+            {
+                ItemId = l.Item.Id,
+                StockItemId = l.SelectedStockItemId,
+                ExpectedStockVersion = l.Candidates
+                    .Single(candidate => candidate.StockItemId == l.SelectedStockItemId)
+                    .Version,
+                Quantity = l.QuantityToDispense,
+                Notes = "Eczacı teslim kaydı",
+            })
+            .ToList();
+
+        if (validItems.Count == 0)
+        {
+            _dispenseError = "Teslim edilecek en az bir geçerli ilaç ve parti seçilmelidir.";
+            return;
+        }
+
+        _isSubmittingDispense = true;
+
+        try
+        {
+            var req = new DispensePrescriptionRequest
+            {
+                IdempotencyKey = _dispenseIdempotencyKey,
+                ExpectedVersion = _selectedPrescription.Version,
+                Items = validItems,
+            };
+            var updated = await PharmacyApi.DispensePrescriptionAsync(_selectedPrescription.Id, req);
+
+            if (updated is not null)
+            {
+                _selectedPrescription = updated;
+                _isDispenseModalOpen = false;
+                _successMessage = $"Reçete teslimi başarıyla kaydedildi ({updated.PrescriptionNumber}). Durum: {GetStatusDisplayText(updated.Status)}";
+                await LoadWorklistAsync();
+            }
+            else
+            {
+                _dispenseError = "İlaç teslimi kaydedilemedi. Stok miktarını ve geçerlilik durumunu kontrol ediniz.";
+            }
+        }
+        catch (Exception ex)
+        {
+            _dispenseError = $"Teslim hatası: {ex.Message}";
+        }
+        finally
+        {
+            _isSubmittingDispense = false;
+        }
+    }
+
+    private static bool CanBeDispensed(PrescriptionDetailResponse rx) =>
+        rx.Status == "Signed" || rx.Status == "PartiallyDispensed";
+
+    private static string GetStatusDisplayText(string status) => status switch
+    {
+        "Draft" => "Taslak",
+        "Signed" => "İmzalı (Signed)",
+        "PartiallyDispensed" => "Kısmen Karşılandı",
+        "Dispensed" => "Tamamı Karşılandı",
+        "Cancelled" => "İptal Edildi",
+        "Expired" => "Süresi Doldu",
+        "EnteredInError" => "Hatalı Giriş",
+        _ => status,
+    };
+
+    private static string GetStatusBadgeClass(string status) => status switch
+    {
+        "Draft" => "ui-badge--secondary",
+        "Signed" => "ui-badge--primary",
+        "PartiallyDispensed" => "ui-badge--warning",
+        "Dispensed" => "ui-badge--success",
+        "Cancelled" => "ui-badge--danger",
+        "Expired" => "ui-badge--muted",
+        "EnteredInError" => "ui-badge--danger",
+        _ => "ui-badge--secondary",
+    };
+
+    private sealed class DispenseLineModel
+    {
+        public PrescriptionItemResponse Item { get; set; } = default!;
+        public List<FefoCandidateStockResponse> Candidates { get; set; } = [];
+        public Guid SelectedStockItemId { get; set; }
+        public int QuantityToDispense { get; set; }
+    }
+}

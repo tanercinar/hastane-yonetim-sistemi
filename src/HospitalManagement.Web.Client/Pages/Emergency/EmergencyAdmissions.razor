@@ -1,0 +1,818 @@
+@page "/emergency/admissions"
+@using HospitalManagement.Contracts.Emergency
+@using HospitalManagement.Contracts.Patients
+@using HospitalManagement.Web.Client.Emergency
+@using HospitalManagement.Web.Client.Patients
+@inject IEmergencyApiClient EmergencyApi
+@inject IPatientApiClient PatientApi
+
+<div class="container-fluid py-3">
+    <!-- Header -->
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <div>
+            <h2 class="fw-bold mb-0">Acil Başvuru &amp; Triyaj Yönetimi</h2>
+            <p class="text-muted mb-0">Acil servis walk-in, ambulans başvuruları, insan kararlı triyaj seviyelendirmesi ve alan takibi.</p>
+        </div>
+        <div class="d-flex gap-2">
+            <button class="btn btn-outline-primary" @onclick="LoadAdmissionsAsync">
+                <i class="bi bi-arrow-clockwise me-1"></i> Yenile
+            </button>
+            <button class="btn btn-danger" @onclick="OpenCreateModal">
+                <i class="bi bi-plus-circle me-1"></i> Yeni Acil Kaydı
+            </button>
+        </div>
+    </div>
+
+    <!-- Alert Messages -->
+    @if (!string.IsNullOrWhiteSpace(_errorMessage))
+    {
+        <div class="alert alert-danger alert-dismissible fade show" role="alert">
+            <i class="bi bi-exclamation-triangle-fill me-2"></i>@_errorMessage
+            <button type="button" class="btn-close" @onclick="() => _errorMessage = null"></button>
+        </div>
+    }
+    @if (!string.IsNullOrWhiteSpace(_successMessage))
+    {
+        <div class="alert alert-success alert-dismissible fade show" role="alert">
+            <i class="bi bi-check-circle-fill me-2"></i>@_successMessage
+            <button type="button" class="btn-close" @onclick="() => _successMessage = null"></button>
+        </div>
+    }
+
+    <!-- Stat Filter Cards -->
+    <div class="row g-3 mb-4">
+        <div class="col-md-2 col-6">
+            <div class="card border-0 shadow-sm text-center p-3 cursor-pointer @(_selectedStatusFilter == null ? "border-primary border-2" : string.Empty)"
+                 @onclick="() => SetStatusFilter(null)">
+                <span class="text-muted small">Tüm Başvurular</span>
+                <h3 class="fw-bold my-1">@_allAdmissions.Count</h3>
+            </div>
+        </div>
+        <div class="col-md-2 col-6">
+            <div class="card border-0 shadow-sm text-center p-3 cursor-pointer @(_selectedStatusFilter == "WaitingTriage" ? "border-warning border-2" : string.Empty)"
+                 @onclick='() => SetStatusFilter("WaitingTriage")'>
+                <span class="text-warning small fw-semibold">Triyaj Bekleyen</span>
+                <h3 class="fw-bold my-1 text-warning">@_allAdmissions.Count(a => a.Status == "WaitingTriage")</h3>
+            </div>
+        </div>
+        <div class="col-md-2 col-6">
+            <div class="card border-0 shadow-sm text-center p-3 cursor-pointer @(_selectedStatusFilter == "TriagedWaitingDoctor" ? "border-info border-2" : string.Empty)"
+                 @onclick='() => SetStatusFilter("TriagedWaitingDoctor")'>
+                <span class="text-info small fw-semibold">Hekim Bekleyen</span>
+                <h3 class="fw-bold my-1 text-info">@_allAdmissions.Count(a => a.Status == "TriagedWaitingDoctor")</h3>
+            </div>
+        </div>
+        <div class="col-md-2 col-6">
+            <div class="card border-0 shadow-sm text-center p-3 cursor-pointer @(_selectedStatusFilter == "InEvaluation" ? "border-primary border-2" : string.Empty)"
+                 @onclick='() => SetStatusFilter("InEvaluation")'>
+                <span class="text-primary small fw-semibold">Değerlendirmede</span>
+                <h3 class="fw-bold my-1 text-primary">@_allAdmissions.Count(a => a.Status == "InEvaluation")</h3>
+            </div>
+        </div>
+        <div class="col-md-2 col-6">
+            <div class="card border-0 shadow-sm text-center p-3 cursor-pointer @(_selectedStatusFilter == "InObservation" ? "border-secondary border-2" : string.Empty)"
+                 @onclick='() => SetStatusFilter("InObservation")'>
+                <span class="text-secondary small fw-semibold">Gözlemde</span>
+                <h3 class="fw-bold my-1 text-secondary">@_allAdmissions.Count(a => a.Status == "InObservation")</h3>
+            </div>
+        </div>
+        <div class="col-md-2 col-6">
+            <div class="card border-0 shadow-sm text-center p-3 cursor-pointer @(_selectedStatusFilter == "Discharged" ? "border-success border-2" : string.Empty)"
+                 @onclick='() => SetStatusFilter("Discharged")'>
+                <span class="text-success small fw-semibold">Sonuçlanan / Taburcu</span>
+                <h3 class="fw-bold my-1 text-success">@_allAdmissions.Count(a => a.Status is "Discharged" or "AdmittedToInpatient" or "AdmittedToIcu" or "TransferredOut")</h3>
+            </div>
+        </div>
+    </div>
+
+    <!-- Admissions Table -->
+    <div class="card shadow-sm border-0">
+        <div class="card-header bg-white py-3 border-0">
+            <div class="d-flex justify-content-between align-items-center">
+                <h5 class="fw-bold mb-0"><i class="bi bi-hospital me-2"></i>Acil Başvuru Listesi</h5>
+                <span class="badge bg-light text-dark border">@_filteredAdmissions.Count Kayıt Listeleniyor</span>
+            </div>
+        </div>
+        @if (_isLoading)
+        {
+            <div class="text-center py-5">
+                <div class="spinner-border text-danger" role="status">
+                    <span class="visually-hidden">Yükleniyor...</span>
+                </div>
+                <p class="text-muted mt-2">Acil kayıtları yükleniyor...</p>
+            </div>
+        }
+        else if (_filteredAdmissions.Count == 0)
+        {
+            <div class="text-center py-5 text-muted">
+                <i class="bi bi-inbox fs-1 d-block mb-2"></i>
+                Seçilen kriterlere uygun acil başvuru kaydı bulunamadı.
+            </div>
+        }
+        else
+        {
+            <div class="table-responsive">
+                <table class="table table-hover align-middle mb-0">
+                    <thead class="table-light">
+                        <tr>
+                            <th>Protokol No</th>
+                            <th>Geliş Şekli</th>
+                            <th>Triyaj Kodu</th>
+                            <th>Başvuru Şikâyeti</th>
+                            <th>Durum</th>
+                            <th>Alan / Yatak</th>
+                            <th>Geliş Zamanı</th>
+                            <th class="text-end">İşlemler</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var item in _filteredAdmissions)
+                        {
+                            <tr>
+                                <td><span class="fw-bold text-dark font-monospace">@item.EmergencyProtocolNumber</span></td>
+                                <td>@GetArrivalTypeBadge(item.ArrivalType)</td>
+                                <td>@GetTriageLevelBadge(item.TriageLevel)</td>
+                                <td>
+                                    <div class="text-truncate" style="max-width: 250px;" title="@item.ChiefComplaint">
+                                        @item.ChiefComplaint
+                                    </div>
+                                </td>
+                                <td>@GetStatusBadge(item.Status)</td>
+                                <td>
+                                    @if (!string.IsNullOrWhiteSpace(item.AssignedBedOrZone))
+                                    {
+                                        <span class="badge bg-light text-dark border"><i class="bi bi-geo-alt me-1"></i>@item.AssignedBedOrZone</span>
+                                    }
+                                    else
+                                    {
+                                        <span class="text-muted small">Atanmadı</span>
+                                    }
+                                </td>
+                                <td><small class="text-muted">@item.AdmittedAtUtc.ToLocalTime().ToString("HH:mm - dd.MM.yyyy")</small></td>
+                                <td class="text-end">
+                                    <div class="btn-group btn-group-sm">
+                                        <button class="btn btn-outline-secondary" @onclick="() => ViewDetailsAsync(item.Id)" title="Detay">
+                                            <i class="bi bi-eye"></i>
+                                        </button>
+                                        @if (item.Status is "WaitingTriage" or "TriagedWaitingDoctor" or "InEvaluation")
+                                        {
+                                            <button class="btn btn-outline-warning" @onclick="() => OpenTriageModal(item.Id)" title="Triyaj Değerlendir">
+                                                <i class="bi bi-heart-pulse"></i> Triyaj
+                                            </button>
+                                        }
+                                        @if (item.Status is "TriagedWaitingDoctor" or "InEvaluation" or "InObservation")
+                                        {
+                                            <button class="btn btn-outline-info" @onclick="() => OpenAssignDoctorModal(item.Id)" title="Hekim/Alan Ata">
+                                                <i class="bi bi-person-badge"></i>
+                                            </button>
+                                            <button class="btn btn-outline-primary" @onclick="() => OpenUpdateStatusModal(item.Id)" title="Durum Güncelle">
+                                                <i class="bi bi-arrow-right-circle"></i>
+                                            </button>
+                                        }
+                                    </div>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </div>
+</div>
+
+<!-- Modal 1: Yeni Acil Başvuru Kaydı -->
+@if (_showCreateModal)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content border-0 shadow">
+                <div class="modal-header bg-danger text-white">
+                    <h5 class="modal-title"><i class="bi bi-plus-circle me-2"></i>Yeni Acil Başvuru Kaydı</h5>
+                    <button type="button" class="btn-close btn-close-white" @onclick="() => _showCreateModal = false"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">Hasta Seçimi</label>
+                        <select class="form-select" @bind="_createRequest.PatientId">
+                            <option value="@Guid.Empty">-- Hasta Seçin --</option>
+                            @foreach (var p in _availablePatients)
+                            {
+                                <option value="@p.Id">@p.FirstName @p.LastName (@(p.MaskedNationalId ?? p.MedicalRecordNumber))</option>
+                            }
+                        </select>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">Geliş Şekli</label>
+                        <select class="form-select" @bind="_createRequest.ArrivalType">
+                            <option value="WalkIn">Ayaktan (Walk-in)</option>
+                            <option value="Ambulance">Ambulans (112 / Özel)</option>
+                            <option value="TransferFromOtherFacility">Dış Merkezden Sevk</option>
+                        </select>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">Başvuru Şikâyeti <span class="text-danger">*</span></label>
+                        <textarea class="form-control" rows="3" @bind="_createRequest.ChiefComplaint"
+                                  placeholder="Örn: Şiddetli göğüs ağrısı, nefes darlığı, sağ kolda uyuşma"></textarea>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">Geliş / Kabul Notları</label>
+                        <input type="text" class="form-control" @bind="_createRequest.AdmissionNotes"
+                               placeholder="Örn: Refakatçi: Eşi, 112 Nakil Tutanağı teslim alındı." />
+                    </div>
+                </div>
+                <div class="modal-footer bg-light">
+                    <button type="button" class="btn btn-secondary" @onclick="() => _showCreateModal = false">Vazgeç</button>
+                    <button type="button" class="btn btn-danger" @onclick="SubmitCreateAdmissionAsync" disabled="@_isSubmitting">
+                        @if (_isSubmitting)
+                        {
+                            <span class="spinner-border spinner-border-sm me-1"></span>
+                        }
+                        Kaydet ve Triyaja Al
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+<!-- Modal 2: Triyaj Kaydı Gir -->
+@if (_showTriageModal)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal-dialog modal-lg modal-dialog-centered">
+            <div class="modal-content border-0 shadow">
+                <div class="modal-header bg-warning text-dark">
+                    <h5 class="modal-title"><i class="bi bi-heart-pulse me-2"></i>Acil Triyaj Kaydı ve Değerlendirmesi</h5>
+                    <button type="button" class="btn-close" @onclick="() => _showTriageModal = false"></button>
+                </div>
+                <div class="modal-body">
+                    <!-- Educational Classification Notice -->
+                    <div class="alert alert-info py-2 mb-3">
+                        <i class="bi bi-info-circle-fill me-2"></i>
+                        <strong>Eğitim Sınıflandırması Destekli:</strong> Sistem otomatik tanı/tıbbi karar vermez; triyaj kategorisi insan/sağlık personeli seçimidir.
+                    </div>
+
+                    <div class="row g-3 mb-3">
+                        <div class="col-md-6">
+                            <label class="form-label fw-bold">Triyaj Seviyesi <span class="text-danger">*</span></label>
+                            <select class="form-select" @bind="_triageRequest.TriageLevel">
+                                <option value="Red1Resuscitation">🔴 Kırmızı 1 (Resüsitasyon - 0 dk)</option>
+                                <option value="Red2Emergency">🔴 Kırmızı 2 (Çok Acil - &lt;10 dk)</option>
+                                <option value="YellowUrgent">🟡 Sarı (Acil - &lt;60 dk)</option>
+                                <option value="GreenStandard">🟢 Yeşil (Standart - &lt;120 dk)</option>
+                                <option value="BlackExpectant">⚫ Siyah (Ekspektan)</option>
+                            </select>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label fw-bold">Bilinç Durumu (AVPU)</label>
+                            <select class="form-select" @bind="_triageRequest.Consciousness">
+                                <option value="Alert">Alert (Açık)</option>
+                                <option value="Voice">Voice (Sözlü Uyarana Yanıt)</option>
+                                <option value="Pain">Pain (Ağrılı Uyarana Yanıt)</option>
+                                <option value="Unresponsive">Unresponsive (Yanıtsız)</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">Triyaj Gerekçesi <span class="text-danger">*</span></label>
+                        <input type="text" class="form-control" @bind="_triageRequest.TriageCategoryReason"
+                               placeholder="Örn: Akut göğüs ağrısı, hipotansiyon ve soğuk terleme mevcut." />
+                    </div>
+
+                    <h6 class="fw-bold border-bottom pb-2 mt-4"><i class="bi bi-activity me-1"></i>Vital Bulgular</h6>
+                    <div class="row g-3">
+                        <div class="col-md-3 col-6">
+                            <label class="form-label small">Sistolik KB (mmHg)</label>
+                            <input type="number" class="form-control" @bind="_triageRequest.SystolicBp" placeholder="120" />
+                        </div>
+                        <div class="col-md-3 col-6">
+                            <label class="form-label small">Diyastolik KB (mmHg)</label>
+                            <input type="number" class="form-control" @bind="_triageRequest.DiastolicBp" placeholder="80" />
+                        </div>
+                        <div class="col-md-3 col-6">
+                            <label class="form-label small">Nabız (atım/dk)</label>
+                            <input type="number" class="form-control" @bind="_triageRequest.HeartRate" placeholder="75" />
+                        </div>
+                        <div class="col-md-3 col-6">
+                            <label class="form-label small">Ateş (°C)</label>
+                            <input type="number" step="0.1" class="form-control" @bind="_triageRequest.BodyTemperatureCelsius" placeholder="36.5" />
+                        </div>
+                        <div class="col-md-3 col-6">
+                            <label class="form-label small">Solunum (dk)</label>
+                            <input type="number" class="form-control" @bind="_triageRequest.RespiratoryRate" placeholder="16" />
+                        </div>
+                        <div class="col-md-3 col-6">
+                            <label class="form-label small">SpO2 (%)</label>
+                            <input type="number" class="form-control" @bind="_triageRequest.OxygenSaturationPercent" placeholder="98" />
+                        </div>
+                        <div class="col-md-3 col-6">
+                            <label class="form-label small">Ağrı Skalası (0-10)</label>
+                            <input type="number" min="0" max="10" class="form-control" @bind="_triageRequest.PainScale" placeholder="3" />
+                        </div>
+                    </div>
+
+                    <div class="mt-3">
+                        <label class="form-label">Klinik Notlar / İlk Müdahale</label>
+                        <textarea class="form-control" rows="2" @bind="_triageRequest.ClinicalNotes"
+                                  placeholder="Örn: O2 2L/dk takıldı, damar yolu açıldı."></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer bg-light">
+                    <button type="button" class="btn btn-secondary" @onclick="() => _showTriageModal = false">Vazgeç</button>
+                    <button type="button" class="btn btn-warning text-dark fw-bold" @onclick="SubmitTriageAsync" disabled="@_isSubmitting">
+                        @if (_isSubmitting)
+                        {
+                            <span class="spinner-border spinner-border-sm me-1"></span>
+                        }
+                        Triyajı Onayla
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+<!-- Modal 3: Hekim ve Alan Ata -->
+@if (_showAssignModal)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content border-0 shadow">
+                <div class="modal-header bg-info text-white">
+                    <h5 class="modal-title"><i class="bi bi-person-badge me-2"></i>Hekim &amp; Alan / Yatak Atama</h5>
+                    <button type="button" class="btn-close btn-close-white" @onclick="() => _showAssignModal = false"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">Sorumlu Hekim ID <span class="text-danger">*</span></label>
+                        <input type="text" class="form-control font-monospace" @bind="_assignRequest.DoctorId"
+                               placeholder="00000000-0000-0000-0000-000000000102" />
+                        <small class="text-muted">Örn: DEMO Nöbetçi Acil Hekimi</small>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">Acil Alanı / Yatak</label>
+                        <input type="text" class="form-control" @bind="_assignRequest.BedOrZone"
+                               placeholder="Örn: Kırmızı Alan - Yatak 1, Sarı Alan - Yatak 4, Yeşil Alan - Muayene 2" />
+                    </div>
+                </div>
+                <div class="modal-footer bg-light">
+                    <button type="button" class="btn btn-secondary" @onclick="() => _showAssignModal = false">Vazgeç</button>
+                    <button type="button" class="btn btn-info text-white" @onclick="SubmitAssignDoctorAsync" disabled="@_isSubmitting">
+                        @if (_isSubmitting)
+                        {
+                            <span class="spinner-border spinner-border-sm me-1"></span>
+                        }
+                        Atamayı Tamamla
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+<!-- Modal 4: Durum Güncelle -->
+@if (_showStatusModal)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content border-0 shadow">
+                <div class="modal-header bg-primary text-white">
+                    <h5 class="modal-title"><i class="bi bi-arrow-right-circle me-2"></i>Başvuru Durumu Güncelle</h5>
+                    <button type="button" class="btn-close btn-close-white" @onclick="() => _showStatusModal = false"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">Yeni Durum</label>
+                        <select class="form-select" @bind="_statusRequest.Status">
+                            <option value="InEvaluation">Değerlendirmede (InEvaluation)</option>
+                            <option value="InObservation">Gözlemde (InObservation)</option>
+                            <option value="AdmittedToInpatient">Servise Yatış (AdmittedToInpatient)</option>
+                            <option value="AdmittedToIcu">Yoğun Bakıma Yatış (AdmittedToIcu)</option>
+                            <option value="Discharged">Taburcu Edildi (Discharged)</option>
+                            <option value="TransferredOut">Dış Merkeze Sevk (TransferredOut)</option>
+                            <option value="LeftWithoutBeingSeen">Haber Vermeden Ayrıldı (LeftWithoutBeingSeen)</option>
+                        </select>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">Sonuç / Değerlendirme Notu</label>
+                        <textarea class="form-control" rows="3" @bind="_statusRequest.Notes"
+                                  placeholder="Örn: Tedavi sonrası semptomları geriledi, şifa ile taburcu edildi."></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer bg-light">
+                    <button type="button" class="btn btn-secondary" @onclick="() => _showStatusModal = false">Vazgeç</button>
+                    <button type="button" class="btn btn-primary" @onclick="SubmitUpdateStatusAsync" disabled="@_isSubmitting">
+                        @if (_isSubmitting)
+                        {
+                            <span class="spinner-border spinner-border-sm me-1"></span>
+                        }
+                        Güncelle
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+<!-- Modal 5: Başvuru Detay Görünümü -->
+@if (_selectedAdmission != null)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal-dialog modal-lg modal-dialog-centered">
+            <div class="modal-content border-0 shadow">
+                <div class="modal-header bg-dark text-white">
+                    <h5 class="modal-title"><i class="bi bi-file-earmark-medical me-2"></i>Acil Başvuru Detayı: @_selectedAdmission.EmergencyProtocolNumber</h5>
+                    <button type="button" class="btn-close btn-close-white" @onclick="() => _selectedAdmission = null"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="row g-3 mb-3">
+                        <div class="col-md-4">
+                            <span class="text-muted small d-block">Geliş Şekli</span>
+                            <strong>@_selectedAdmission.ArrivalType</strong>
+                        </div>
+                        <div class="col-md-4">
+                            <span class="text-muted small d-block">Başvuru Durumu</span>
+                            @GetStatusBadge(_selectedAdmission.Status)
+                        </div>
+                        <div class="col-md-4">
+                            <span class="text-muted small d-block">Geliş Zamanı</span>
+                            <strong>@_selectedAdmission.AdmittedAtUtc.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</strong>
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <span class="text-muted small d-block">Başvuru Şikâyeti</span>
+                        <div class="p-2 bg-light rounded">@_selectedAdmission.ChiefComplaint</div>
+                    </div>
+
+                    @if (_selectedAdmission.Triage != null)
+                    {
+                        <div class="card border-warning mb-3">
+                            <div class="card-header bg-warning-subtle text-dark fw-bold">
+                                <i class="bi bi-heart-pulse me-1"></i> Triyaj Kaydı (@GetTriageLevelBadge(_selectedAdmission.Triage.TriageLevel))
+                            </div>
+                            <div class="card-body">
+                                <p class="mb-2"><strong>Triyaj Gerekçesi:</strong> @_selectedAdmission.Triage.TriageCategoryReason</p>
+                                <div class="row g-2 mb-2">
+                                    <div class="col-md-3 col-6"><small class="text-muted">KB:</small> <strong>@(_selectedAdmission.Triage.SystolicBp.HasValue ? $"{_selectedAdmission.Triage.SystolicBp}/{_selectedAdmission.Triage.DiastolicBp}" : "-")</strong></div>
+                                    <div class="col-md-3 col-6"><small class="text-muted">Nabız:</small> <strong>@(_selectedAdmission.Triage.HeartRate.HasValue ? $"{_selectedAdmission.Triage.HeartRate} bpm" : "-")</strong></div>
+                                    <div class="col-md-3 col-6"><small class="text-muted">Ateş:</small> <strong>@(_selectedAdmission.Triage.BodyTemperatureCelsius.HasValue ? $"{_selectedAdmission.Triage.BodyTemperatureCelsius} °C" : "-")</strong></div>
+                                    <div class="col-md-3 col-6"><small class="text-muted">SpO2:</small> <strong>@(_selectedAdmission.Triage.OxygenSaturationPercent.HasValue ? $"%{_selectedAdmission.Triage.OxygenSaturationPercent}" : "-")</strong></div>
+                                    <div class="col-md-3 col-6"><small class="text-muted">Ağrı Skoru:</small> <strong>@(_selectedAdmission.Triage.PainScale.HasValue ? $"{_selectedAdmission.Triage.PainScale}/10" : "-")</strong></div>
+                                    <div class="col-md-3 col-6"><small class="text-muted">Bilinç:</small> <strong>@(_selectedAdmission.Triage.Consciousness ?? "-")</strong></div>
+                                </div>
+                                @if (!string.IsNullOrWhiteSpace(_selectedAdmission.Triage.ClinicalNotes))
+                                {
+                                    <p class="mb-0 text-muted small"><strong>Notlar:</strong> @_selectedAdmission.Triage.ClinicalNotes</p>
+                                }
+                            </div>
+                        </div>
+                    }
+
+                    @if (!string.IsNullOrWhiteSpace(_selectedAdmission.DischargeOrDispositionNotes))
+                    {
+                        <div class="mb-3">
+                            <span class="text-muted small d-block">Sonuç Notları</span>
+                            <div class="p-2 bg-light rounded">@_selectedAdmission.DischargeOrDispositionNotes</div>
+                        </div>
+                    }
+                </div>
+                <div class="modal-footer bg-light">
+                    <button type="button" class="btn btn-secondary" @onclick="() => _selectedAdmission = null">Kapat</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private bool _isLoading = true;
+    private bool _isSubmitting;
+    private string? _errorMessage;
+    private string? _successMessage;
+    private string? _selectedStatusFilter;
+
+    private List<EmergencyAdmissionSummaryResponse> _allAdmissions = [];
+    private List<EmergencyAdmissionSummaryResponse> _filteredAdmissions = [];
+    private List<PatientSummaryResponse> _availablePatients = [];
+
+    private EmergencyAdmissionResponse? _selectedAdmission;
+    private bool _showCreateModal;
+    private bool _showTriageModal;
+    private bool _showAssignModal;
+    private bool _showStatusModal;
+    private Guid _targetAdmissionId;
+
+    private CreateEmergencyAdmissionRequest _createRequest = new();
+    private RecordTriageRequest _triageRequest = new();
+    private AssignEmergencyDoctorRequest _assignRequest = new();
+    private UpdateEmergencyAdmissionStatusRequest _statusRequest = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadAdmissionsAsync();
+        await LoadPatientsAsync();
+    }
+
+    private async Task LoadAdmissionsAsync()
+    {
+        _isLoading = true;
+        _errorMessage = null;
+        try
+        {
+            _allAdmissions = await EmergencyApi.GetAdmissionsAsync();
+            ApplyFilter();
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"Acil kayıtları yüklenirken hata: {ex.Message}";
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+    }
+
+    private async Task LoadPatientsAsync()
+    {
+        try
+        {
+            var paged = await PatientApi.SearchPatientsAsync(string.Empty, page: 1, pageSize: 20);
+            _availablePatients = paged?.Items?.ToList() ?? [];
+        }
+        catch
+        {
+            _availablePatients = [];
+        }
+    }
+
+    private void SetStatusFilter(string? status)
+    {
+        _selectedStatusFilter = status;
+        ApplyFilter();
+    }
+
+    private void ApplyFilter()
+    {
+        if (string.IsNullOrWhiteSpace(_selectedStatusFilter))
+        {
+            _filteredAdmissions = [.. _allAdmissions];
+        }
+        else if (_selectedStatusFilter == "Discharged")
+        {
+            _filteredAdmissions = _allAdmissions
+                .Where(a => a.Status is "Discharged" or "AdmittedToInpatient" or "AdmittedToIcu" or "TransferredOut")
+                .ToList();
+        }
+        else
+        {
+            _filteredAdmissions = _allAdmissions
+                .Where(a => a.Status == _selectedStatusFilter)
+                .ToList();
+        }
+    }
+
+    private void OpenCreateModal()
+    {
+        _createRequest = new CreateEmergencyAdmissionRequest();
+        _showCreateModal = true;
+    }
+
+    private void OpenTriageModal(Guid admissionId)
+    {
+        _targetAdmissionId = admissionId;
+        _triageRequest = new RecordTriageRequest
+        {
+            TriageLevel = "YellowUrgent",
+            Consciousness = "Alert",
+        };
+        _showTriageModal = true;
+    }
+
+    private void OpenAssignDoctorModal(Guid admissionId)
+    {
+        _targetAdmissionId = admissionId;
+        _assignRequest = new AssignEmergencyDoctorRequest
+        {
+            DoctorId = Guid.Parse("00000000-0000-0000-0000-000000000102"),
+        };
+        _showAssignModal = true;
+    }
+
+    private void OpenUpdateStatusModal(Guid admissionId)
+    {
+        _targetAdmissionId = admissionId;
+        _statusRequest = new UpdateEmergencyAdmissionStatusRequest
+        {
+            Status = "InObservation",
+        };
+        _showStatusModal = true;
+    }
+
+    private async Task ViewDetailsAsync(Guid id)
+    {
+        try
+        {
+            _selectedAdmission = await EmergencyApi.GetAdmissionByIdAsync(id);
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"Detay yüklenemedi: {ex.Message}";
+        }
+    }
+
+    private async Task SubmitCreateAdmissionAsync()
+    {
+        if (_createRequest.PatientId == Guid.Empty)
+        {
+            _errorMessage = "Lütfen hasta seçin.";
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(_createRequest.ChiefComplaint))
+        {
+            _errorMessage = "Lütfen başvuru şikâyetini girin.";
+            return;
+        }
+
+        _isSubmitting = true;
+        _errorMessage = null;
+        try
+        {
+            var result = await EmergencyApi.CreateAdmissionAsync(_createRequest);
+            if (result != null)
+            {
+                _successMessage = $"Acil başvuru kaydedildi. Protokol: {result.EmergencyProtocolNumber}";
+                _showCreateModal = false;
+                await LoadAdmissionsAsync();
+            }
+            else
+            {
+                _errorMessage = "Acil başvuru kaydedilemedi veya hastanın aktif bir başvurusu var.";
+            }
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"Kayıt sırasında hata: {ex.Message}";
+        }
+        finally
+        {
+            _isSubmitting = false;
+        }
+    }
+
+    private async Task SubmitTriageAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_triageRequest.TriageCategoryReason))
+        {
+            _errorMessage = "Lütfen triyaj gerekçesini belirtin.";
+            return;
+        }
+
+        _isSubmitting = true;
+        _errorMessage = null;
+        try
+        {
+            var result = await EmergencyApi.RecordTriageAsync(_targetAdmissionId, _triageRequest);
+            if (result != null)
+            {
+                _successMessage = "Triyaj kaydı başarıyla tamamlandı.";
+                _showTriageModal = false;
+                await LoadAdmissionsAsync();
+            }
+            else
+            {
+                _errorMessage = "Triyaj kaydedilemedi.";
+            }
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"Triyaj sırasında hata: {ex.Message}";
+        }
+        finally
+        {
+            _isSubmitting = false;
+        }
+    }
+
+    private async Task SubmitAssignDoctorAsync()
+    {
+        _isSubmitting = true;
+        _errorMessage = null;
+        try
+        {
+            var result = await EmergencyApi.AssignDoctorAsync(_targetAdmissionId, _assignRequest);
+            if (result != null)
+            {
+                _successMessage = "Hekim ve alan ataması yapıldı.";
+                _showAssignModal = false;
+                await LoadAdmissionsAsync();
+            }
+            else
+            {
+                _errorMessage = "Atama yapılamadı.";
+            }
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"Atama sırasında hata: {ex.Message}";
+        }
+        finally
+        {
+            _isSubmitting = false;
+        }
+    }
+
+    private async Task SubmitUpdateStatusAsync()
+    {
+        _isSubmitting = true;
+        _errorMessage = null;
+        try
+        {
+            var result = await EmergencyApi.UpdateStatusAsync(_targetAdmissionId, _statusRequest);
+            if (result != null)
+            {
+                _successMessage = "Acil başvuru durumu güncellendi.";
+                _showStatusModal = false;
+                await LoadAdmissionsAsync();
+            }
+            else
+            {
+                _errorMessage = "Durum güncellenemedi.";
+            }
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"Durum güncelleme hatası: {ex.Message}";
+        }
+        finally
+        {
+            _isSubmitting = false;
+        }
+    }
+
+    private static RenderFragment GetTriageLevelBadge(string? level) => builder =>
+    {
+        var (css, label) = level switch
+        {
+            "Red1Resuscitation" or "Red1_Resuscitation" => ("bg-danger text-white", "🔴 Kırmızı 1 (Resüsitasyon)"),
+            "Red2Emergency" or "Red2_Emergency" => ("bg-danger text-white", "🔴 Kırmızı 2 (Çok Acil)"),
+            "YellowUrgent" or "Yellow_Urgent" => ("bg-warning text-dark", "🟡 Sarı (Acil)"),
+            "GreenStandard" or "Green_Standard" => ("bg-success text-white", "🟢 Yeşil (Standart)"),
+            "BlackExpectant" or "Black_Expectant" => ("bg-dark text-white", "⚫ Siyah (Ekspektan)"),
+            _ => ("bg-secondary-subtle text-secondary border", "Belirlenmedi"),
+        };
+
+        builder.OpenElement(0, "span");
+        builder.AddAttribute(1, "class", $"badge {css}");
+        builder.AddContent(2, label);
+        builder.CloseElement();
+    };
+
+    private static RenderFragment GetArrivalTypeBadge(string arrivalType) => builder =>
+    {
+        var (css, icon, text) = arrivalType switch
+        {
+            "Ambulance" => ("bg-danger-subtle text-danger border border-danger", "bi-truck-front", "Ambulans (112)"),
+            "TransferFromOtherFacility" => ("bg-info-subtle text-info border border-info", "bi-hospital", "Dış Sevk"),
+            _ => ("bg-secondary-subtle text-dark border", "bi-person-walking", "Ayaktan (Walk-in)"),
+        };
+
+        builder.OpenElement(0, "span");
+        builder.AddAttribute(1, "class", $"badge {css}");
+        builder.OpenElement(2, "i");
+        builder.AddAttribute(3, "class", $"bi {icon} me-1");
+        builder.CloseElement();
+        builder.AddContent(4, text);
+        builder.CloseElement();
+    };
+
+    private static RenderFragment GetStatusBadge(string status) => builder =>
+    {
+        var (css, label) = status switch
+        {
+            "WaitingTriage" => ("bg-warning-subtle text-warning-emphasis border border-warning", "Triyaj Bekliyor"),
+            "TriagedWaitingDoctor" => ("bg-info-subtle text-info-emphasis border border-info", "Hekim Bekliyor"),
+            "InEvaluation" => ("bg-primary-subtle text-primary border border-primary", "Değerlendirmede"),
+            "InObservation" => ("bg-secondary-subtle text-secondary border border-secondary", "Gözlemde"),
+            "AdmittedToInpatient" => ("bg-purple-subtle text-dark border", "Servise Yatırıldı"),
+            "AdmittedToIcu" => ("bg-danger-subtle text-danger border border-danger", "Yoğun Bakıma Yatırıldı"),
+            "Discharged" => ("bg-success-subtle text-success border border-success", "Taburcu Edildi"),
+            "TransferredOut" => ("bg-dark-subtle text-dark border", "Dış Merkeze Sevk"),
+            "LeftWithoutBeingSeen" => ("bg-light text-muted border", "Ayrıldı"),
+            "Deceased" => ("bg-dark text-white", "Eks"),
+            _ => ("bg-light text-dark", status),
+        };
+
+        builder.OpenElement(0, "span");
+        builder.AddAttribute(1, "class", $"badge {css}");
+        builder.AddContent(2, label);
+        builder.CloseElement();
+    };
+}

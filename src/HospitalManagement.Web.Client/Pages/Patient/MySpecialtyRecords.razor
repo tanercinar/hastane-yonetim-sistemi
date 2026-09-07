@@ -1,0 +1,151 @@
+@page "/patient/specialty-records"
+@using System.Net
+@using HospitalManagement.Contracts.Specialty
+@using HospitalManagement.Web.Client.Specialty
+@using Microsoft.AspNetCore.Authorization
+@attribute [Authorize]
+@inject IPatientSpecialtyPortalApiClient SpecialtyPortalApi
+
+<PageTitle>Uzmanlık Kayıtlarım - Hasta Portalı</PageTitle>
+
+<div class="container-fluid px-4 py-3">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <div>
+            <h4 class="mb-0 text-primary fw-bold">Uzmanlık Kayıtlarım</h4>
+            <p class="text-muted small mb-0">Kadın doğum, diş ve evde sağlık süreçlerinizin yayınlanmış özetleri</p>
+        </div>
+        <button class="btn btn-outline-primary btn-sm" @onclick="LoadAsync">Yenile</button>
+    </div>
+
+    <div class="alert alert-info small" role="status">
+        Güvenli hasta görünümü; taslak çalışma kayıtları, klinik notlar, personel kimlikleri,
+        ayrıntılı adres ve yenidoğan klinik bilgileri burada yayınlanmaz.
+    </div>
+
+    @if (_isLoading)
+    {
+        <div class="text-center py-5" role="status">
+            <div class="spinner-border text-primary"><span class="visually-hidden">Yükleniyor...</span></div>
+            <p class="text-muted mt-2">Uzmanlık kayıtlarınız yükleniyor...</p>
+        </div>
+    }
+    else if (_isForbidden)
+    {
+        <ForbiddenState ActionText="Genel Bakışa Dön" ActionHref="/" />
+    }
+    else if (_errorMessage is not null)
+    {
+        <div class="alert alert-danger" role="alert">@_errorMessage</div>
+    }
+    else if (_summary is null || TotalRecordCount == 0)
+    {
+        <div class="card border-0 shadow-sm text-center py-5">
+            <div class="card-body">
+                <h5 class="text-muted">Yayınlanmış uzmanlık kaydı bulunamadı</h5>
+                <p class="text-muted small mb-0">Yayınlanabilir bir kayıt oluştuğunda burada görünecektir.</p>
+            </div>
+        </div>
+    }
+    else
+    {
+        <div class="row g-3">
+            <div class="col-12 col-xl-6">
+                <section class="card border-0 shadow-sm h-100" aria-labelledby="pregnancy-heading">
+                    <div class="card-header bg-white"><h5 id="pregnancy-heading" class="mb-0">Gebelik ve Doğum</h5></div>
+                    <div class="card-body">
+                        @foreach (var item in _summary.Pregnancies)
+                        {
+                            <article class="border-bottom pb-2 mb-2">
+                                <strong>@item.ProtocolNumber</strong>
+                                <div>Durum: @item.Status · Tahmini doğum: @FormatDate(item.EstimatedDeliveryDateUtc)</div>
+                                <small class="text-muted">Kontrol sayısı: @item.VisitCount</small>
+                            </article>
+                        }
+                        @foreach (var item in _summary.Deliveries)
+                        {
+                            <article class="border-bottom pb-2 mb-2">
+                                <strong>@item.ProtocolNumber</strong>
+                                <div>@item.DeliveryMode · @FormatDate(item.DeliveryTimeUtc)</div>
+                                <small class="text-muted">Gebelik yaşı: @item.GestationalAgeWeeks hafta @item.GestationalAgeDays gün · Yenidoğan sayısı: @item.NewbornCount</small>
+                            </article>
+                        }
+                    </div>
+                </section>
+            </div>
+
+            <div class="col-12 col-xl-6">
+                <section class="card border-0 shadow-sm h-100" aria-labelledby="dental-heading">
+                    <div class="card-header bg-white"><h5 id="dental-heading" class="mb-0">Diş Sağlığı</h5></div>
+                    <div class="card-body">
+                        @foreach (var item in _summary.DentalExaminations)
+                        {
+                            <article class="border-bottom pb-2 mb-2"><strong>@item.ProtocolNumber</strong><div>Muayene: @FormatDate(item.ExaminationDateUtc)</div></article>
+                        }
+                        @foreach (var item in _summary.DentalProcedures)
+                        {
+                            <article class="border-bottom pb-2 mb-2"><strong>@item.ProcedureName</strong><div>@item.ProtocolNumber · Tamamlandı: @FormatDate(item.CompletedDateUtc)</div></article>
+                        }
+                    </div>
+                </section>
+            </div>
+
+            <div class="col-12">
+                <section class="card border-0 shadow-sm" aria-labelledby="home-health-heading">
+                    <div class="card-header bg-white"><h5 id="home-health-heading" class="mb-0">Evde Sağlık</h5></div>
+                    <div class="card-body">
+                        @foreach (var item in _summary.HomeHealthVisits)
+                        {
+                            <article class="border-bottom pb-2 mb-2">
+                                <strong>@item.ProtocolNumber</strong>
+                                <div>@item.ServiceType · @item.Status · @item.City / @item.District</div>
+                                <small class="text-muted">Talep: @FormatDate(item.RequestedDateUtc)@if (item.ScheduledDateUtc.HasValue){<text> · Planlanan: @FormatDate(item.ScheduledDateUtc)</text>}</small>
+                            </article>
+                        }
+                    </div>
+                </section>
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    private PatientSpecialtyPortalResponse? _summary;
+    private bool _isLoading = true;
+    private bool _isForbidden;
+    private string? _errorMessage;
+
+    private int TotalRecordCount => _summary is null
+        ? 0
+        : _summary.Pregnancies.Count + _summary.Deliveries.Count
+            + _summary.DentalExaminations.Count + _summary.DentalProcedures.Count
+            + _summary.HomeHealthVisits.Count;
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _isLoading = true;
+        _isForbidden = false;
+        _errorMessage = null;
+        try
+        {
+            _summary = await SpecialtyPortalApi.GetMyPublishedRecordsAsync();
+        }
+        catch (HttpRequestException exception) when (exception.StatusCode == HttpStatusCode.Forbidden)
+        {
+            _summary = null;
+            _isForbidden = true;
+        }
+        catch (Exception)
+        {
+            _summary = null;
+            _errorMessage = "Uzmanlık kayıtları yüklenemedi. Bağlantınızı kontrol edip yeniden deneyin.";
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+    }
+
+    private static string FormatDate(DateTime? value) => value?.ToLocalTime().ToString("dd.MM.yyyy HH:mm") ?? "—";
+}

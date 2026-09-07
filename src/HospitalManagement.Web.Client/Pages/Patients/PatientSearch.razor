@@ -1,0 +1,663 @@
+@page "/staff/patients"
+@page "/patients"
+@inject IPatientApiClient PatientApi
+@inject UserSessionState SessionState
+@inject NavigationManager Navigation
+@inject IStringLocalizer<SharedResources> Localizer
+
+<PageTitle>Hasta Arama ve Kayıt | Hastane Yönetim Sistemi</PageTitle>
+
+<header class="page-heading">
+    <span class="page-eyebrow">Kayıt & Poliklinik</span>
+    <div style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: var(--hys-space-3);">
+        <div>
+            <h1>Hasta Arama ve Kayıt Personeli Ekranı</h1>
+            <p>Hasta ana kaydı arama, mükerrer kontrolü ve yeni hasta kabul işlemleri.</p>
+        </div>
+        <button class="ui-button ui-button--primary" @onclick="OpenRegisterModal" type="button">
+            <svg viewBox="0 0 24 24" style="width: 1rem; height: 1rem; fill: currentColor;" aria-hidden="true">
+                <path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z" />
+            </svg>
+            <span>Yeni Hasta Kaydı</span>
+        </button>
+    </div>
+</header>
+
+@if (_isLoading)
+{
+    <LoadingState />
+}
+else if (_isForbidden)
+{
+    <ForbiddenState ActionText="Genel Bakışa Dön" ActionHref="/" />
+}
+else if (_errorMessage is not null && _patients is null)
+{
+    <ErrorState ActionText="Yeniden Dene" ActionHref="/staff/patients" />
+}
+else
+{
+    @if (!string.IsNullOrWhiteSpace(_statusMessage))
+    {
+        <div class="account-message account-message--success" role="status" style="margin-bottom: var(--hys-space-4);">
+            @_statusMessage
+        </div>
+    }
+
+    @if (!string.IsNullOrWhiteSpace(_errorMessage))
+    {
+        <div class="account-message account-message--error" role="alert" style="margin-bottom: var(--hys-space-4);">
+            @_errorMessage
+        </div>
+    }
+
+    <div class="ui-panel" style="margin-bottom: var(--hys-space-4);">
+        <form @onsubmit="SearchAsync" style="display: flex; gap: var(--hys-space-3); align-items: center; flex-wrap: wrap;">
+            <div style="flex: 1; min-width: 250px;">
+                <input class="ui-input"
+                       type="search"
+                       placeholder="Hasta Adı, Soyadı, MRN (MRN-2026-...) veya TC ile ara..."
+                       @bind="_searchQuery"
+                       style="width: 100%;" />
+            </div>
+            <button class="ui-button ui-button--primary" type="submit">
+                <svg viewBox="0 0 24 24" style="width: 1rem; height: 1rem; fill: currentColor; margin-right: 0.25rem;" aria-hidden="true">
+                    <path d="M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/>
+                </svg>
+                Ara
+            </button>
+            @if (!string.IsNullOrWhiteSpace(_searchQuery))
+            {
+                <button class="ui-button ui-button--secondary" type="button" @onclick="ClearSearchAsync">Temizle</button>
+            }
+        </form>
+        @if (_queryValidationError is not null)
+        {
+            <div style="color: var(--hys-color-danger, #d32f2f); font-size: 0.875rem; margin-top: var(--hys-space-2);">
+                @_queryValidationError
+            </div>
+        }
+        <small style="display: block; margin-top: var(--hys-space-2); color: var(--hys-color-muted, #666);">
+            Gizlilik ilkesi: Geniş aramalarda en az 2 karakter girilmelidir. Tüm aramalar denetim günlüğüne kaydedilir.
+        </small>
+    </div>
+
+    @if (_patients is null || _patients.Items.Count == 0)
+    {
+        <EmptyState Title="Hasta kaydı bulunamadı" Description="Arama kriterlerinize uygun kayıt yok veya henüz hasta kaydedilmedi." />
+    }
+    else
+    {
+        <div class="ui-table-container">
+            <table class="ui-table" style="width: 100%; border-collapse: collapse;">
+                <thead>
+                    <tr style="text-align: left; border-bottom: 2px solid var(--hys-color-border);">
+                        <th style="padding: var(--hys-space-3);">Hasta No (MRN)</th>
+                        <th style="padding: var(--hys-space-3);">Ad Soyad</th>
+                        <th style="padding: var(--hys-space-3);">Doğum Tarihi</th>
+                        <th style="padding: var(--hys-space-3);">Cinsiyet</th>
+                        <th style="padding: var(--hys-space-3);">Sentetik TC</th>
+                        <th style="padding: var(--hys-space-3);">Telefon</th>
+                        <th style="padding: var(--hys-space-3);">Durum</th>
+                        <th style="padding: var(--hys-space-3);">İşlemler</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var patient in _patients.Items)
+                    {
+                        <tr style="border-bottom: 1px solid var(--hys-color-border);">
+                            <td style="padding: var(--hys-space-3); font-weight: bold; font-family: monospace;">
+                                @patient.MedicalRecordNumber
+                            </td>
+                            <td style="padding: var(--hys-space-3);">
+                                @patient.FirstName @patient.LastName
+                            </td>
+                            <td style="padding: var(--hys-space-3);">
+                                @patient.DateOfBirth.ToString("dd.MM.yyyy")
+                            </td>
+                            <td style="padding: var(--hys-space-3);">
+                                @patient.Gender
+                            </td>
+                            <td style="padding: var(--hys-space-3); font-family: monospace;">
+                                @(patient.MaskedNationalId ?? "-")
+                            </td>
+                            <td style="padding: var(--hys-space-3); font-family: monospace;">
+                                @(patient.MaskedPhoneNumber ?? "-")
+                            </td>
+                            <td style="padding: var(--hys-space-3);">
+                                <span class="ui-badge @(patient.IsActive ? "ui-badge--success" : "ui-badge--neutral")">
+                                    @(patient.IsActive ? "Aktif" : "Pasif")
+                                </span>
+                            </td>
+                            <td style="padding: var(--hys-space-3);">
+                                <button class="ui-button ui-button--secondary" style="padding: 0.25rem 0.5rem; font-size: 0.875rem;" @onclick="() => ViewPatientDetailsAsync(patient.Id)" type="button">
+                                    Detay / Düzenle
+                                </button>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-top: var(--hys-space-4); color: var(--hys-color-muted, #666);">
+            <span>Toplam @_patients.TotalCount kayıt listeleniyor (Sayfa @_patients.Page).</span>
+        </div>
+    }
+}
+
+@* YENİ HASTA KAYIT MODALI *@
+@if (_showRegisterModal)
+{
+    <div class="ui-modal-backdrop" style="position: fixed; inset: 0; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 1000; padding: var(--hys-space-4);">
+        <div class="ui-modal" style="background: white; border-radius: 8px; width: 100%; max-width: 650px; max-height: 90vh; overflow-y: auto; padding: var(--hys-space-5); box-shadow: 0 4px 20px rgba(0,0,0,0.15);">
+            <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--hys-color-border); padding-bottom: var(--hys-space-3); margin-bottom: var(--hys-space-4);">
+                <h2 style="margin: 0; font-size: 1.25rem;">Yeni Hasta Kaydı</h2>
+                <button type="button" @onclick="CloseRegisterModal" class="ui-button ui-button--secondary" style="border: none; font-size: 1.25rem; line-height: 1;">&times;</button>
+            </div>
+
+            @if (_duplicateCheckResult?.HasPotentialDuplicate == true)
+            {
+                <div class="account-message account-message--warning" style="margin-bottom: var(--hys-space-4); border: 1px solid #fbc02d; background: #fffde7; padding: var(--hys-space-3); border-radius: 4px;" role="alert">
+                    <strong>Dikkat: Olası Mükerrer Kayıt(lar) Bulundu!</strong>
+                    <ul style="margin: 0.5rem 0 0 1rem; padding: 0;">
+                        @foreach (var candidate in _duplicateCheckResult.Candidates)
+                        {
+                            <li>
+                                <strong>@candidate.FullName</strong> (MRN: @candidate.MedicalRecordNumber, Doğum: @candidate.DateOfBirth.ToString("dd.MM.yyyy")) — <em>@candidate.MatchReason</em>
+                            </li>
+                        }
+                    </ul>
+                </div>
+            }
+
+            <EditForm Model="_regModel" OnValidSubmit="HandleRegisterSubmitAsync">
+                <DataAnnotationsValidator />
+
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: var(--hys-space-3);">
+                    <div>
+                        <label class="ui-label" style="display: block; font-weight: bold; margin-bottom: 0.25rem;">Ad *</label>
+                        <InputText class="ui-input" @bind-Value="_regModel.FirstName" placeholder="Hasta Adı" style="width: 100%;" />
+                        <ValidationMessage For="() => _regModel.FirstName" />
+                    </div>
+                    <div>
+                        <label class="ui-label" style="display: block; font-weight: bold; margin-bottom: 0.25rem;">Soyad *</label>
+                        <InputText class="ui-input" @bind-Value="_regModel.LastName" placeholder="Hasta Soyadı" style="width: 100%;" />
+                        <ValidationMessage For="() => _regModel.LastName" />
+                    </div>
+                </div>
+
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: var(--hys-space-3); margin-top: var(--hys-space-3);">
+                    <div>
+                        <label class="ui-label" style="display: block; font-weight: bold; margin-bottom: 0.25rem;">Doğum Tarihi *</label>
+                        <InputDate class="ui-input" @bind-Value="_regModel.DateOfBirth" style="width: 100%;" />
+                        <ValidationMessage For="() => _regModel.DateOfBirth" />
+                    </div>
+                    <div>
+                        <label class="ui-label" style="display: block; font-weight: bold; margin-bottom: 0.25rem;">Cinsiyet *</label>
+                        <InputSelect class="ui-input" @bind-Value="_regModel.Gender" style="width: 100%;">
+                            <option value="Female">Kadın</option>
+                            <option value="Male">Erkek</option>
+                            <option value="Other">Diğer</option>
+                            <option value="Unspecified">Belirtilmedi</option>
+                        </InputSelect>
+                        <ValidationMessage For="() => _regModel.Gender" />
+                    </div>
+                </div>
+
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: var(--hys-space-3); margin-top: var(--hys-space-3);">
+                    <div>
+                        <label class="ui-label" style="display: block; font-weight: bold; margin-bottom: 0.25rem;">Sentetik TC Kimlik No</label>
+                        <InputText class="ui-input" @bind-Value="_regModel.NationalIdSynthetic" placeholder="99*******01 (DEMO)" style="width: 100%;" />
+                    </div>
+                    <div>
+                        <label class="ui-label" style="display: block; font-weight: bold; margin-bottom: 0.25rem;">Telefon Numarası</label>
+                        <InputText class="ui-input" @bind-Value="_regModel.PhoneNumber" placeholder="+90 555 000 0000" style="width: 100%;" />
+                    </div>
+                </div>
+
+                <div style="margin-top: var(--hys-space-3);">
+                    <label class="ui-label" style="display: block; font-weight: bold; margin-bottom: 0.25rem;">E-posta Adresi (Sentetik)</label>
+                    <InputText class="ui-input" @bind-Value="_regModel.Email" placeholder="DEMO-hasta@hospital.invalid" style="width: 100%;" />
+                </div>
+
+                <h3 style="font-size: 1rem; margin-top: var(--hys-space-4); margin-bottom: var(--hys-space-2); border-bottom: 1px solid var(--hys-color-border); padding-bottom: 0.25rem;">Adres Bilgisi</h3>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: var(--hys-space-3);">
+                    <div>
+                        <label class="ui-label" style="display: block; margin-bottom: 0.25rem;">İl</label>
+                        <InputText class="ui-input" @bind-Value="_regModel.City" placeholder="Örn: Ankara" style="width: 100%;" />
+                    </div>
+                    <div>
+                        <label class="ui-label" style="display: block; margin-bottom: 0.25rem;">İlçe</label>
+                        <InputText class="ui-input" @bind-Value="_regModel.District" placeholder="Örn: Çankaya" style="width: 100%;" />
+                    </div>
+                </div>
+                <div style="margin-top: var(--hys-space-3);">
+                    <label class="ui-label" style="display: block; margin-bottom: 0.25rem;">Açık Adres</label>
+                    <InputText class="ui-input" @bind-Value="_regModel.AddressLine" placeholder="Mahalle, cadde, no" style="width: 100%;" />
+                </div>
+
+                <h3 style="font-size: 1rem; margin-top: var(--hys-space-4); margin-bottom: var(--hys-space-2); border-bottom: 1px solid var(--hys-color-border); padding-bottom: 0.25rem;">Acil Durum İletişim Kişisi</h3>
+                <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: var(--hys-space-3);">
+                    <div>
+                        <label class="ui-label" style="display: block; margin-bottom: 0.25rem;">Ad Soyad</label>
+                        <InputText class="ui-input" @bind-Value="_regModel.EmergencyContactName" placeholder="Yakını" style="width: 100%;" />
+                    </div>
+                    <div>
+                        <label class="ui-label" style="display: block; margin-bottom: 0.25rem;">Yakınlık</label>
+                        <InputText class="ui-input" @bind-Value="_regModel.EmergencyContactRelationship" placeholder="Örn: Eşi, Annesi" style="width: 100%;" />
+                    </div>
+                    <div>
+                        <label class="ui-label" style="display: block; margin-bottom: 0.25rem;">Telefon</label>
+                        <InputText class="ui-input" @bind-Value="_regModel.EmergencyContactPhone" placeholder="+90 555..." style="width: 100%;" />
+                    </div>
+                </div>
+
+                <div style="display: flex; gap: var(--hys-space-3); justify-content: flex-end; margin-top: var(--hys-space-5); border-top: 1px solid var(--hys-color-border); padding-top: var(--hys-space-4);">
+                    <button class="ui-button ui-button--secondary" type="button" @onclick="CheckDuplicateManuallyAsync">
+                        Mükerrer Kontrolü Yap
+                    </button>
+                    <button class="ui-button ui-button--secondary" type="button" @onclick="CloseRegisterModal">İptal</button>
+                    <button class="ui-button ui-button--primary" type="submit" disabled="@_isSubmitting">
+                        @(_isSubmitting ? "Kaydediliyor..." : "Kaydet ve Tamamla")
+                    </button>
+                </div>
+            </EditForm>
+        </div>
+    </div>
+}
+
+@* HASTA DETAY & DÜZENLEME MODALI *@
+@if (_selectedPatient is not null)
+{
+    <div class="ui-modal-backdrop" style="position: fixed; inset: 0; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 1000; padding: var(--hys-space-4);">
+        <div class="ui-modal" style="background: white; border-radius: 8px; width: 100%; max-width: 650px; max-height: 90vh; overflow-y: auto; padding: var(--hys-space-5); box-shadow: 0 4px 20px rgba(0,0,0,0.15);">
+            <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--hys-color-border); padding-bottom: var(--hys-space-3); margin-bottom: var(--hys-space-4);">
+                <div>
+                    <h2 style="margin: 0; font-size: 1.25rem;">Hasta Detayı: @_selectedPatient.FirstName @_selectedPatient.LastName</h2>
+                    <span style="font-size: 0.875rem; font-family: monospace; color: var(--hys-color-muted, #666);">MRN: @_selectedPatient.MedicalRecordNumber (Versiyon: @_selectedPatient.Version)</span>
+                </div>
+                <button type="button" @onclick="CloseDetailModal" class="ui-button ui-button--secondary" style="border: none; font-size: 1.25rem; line-height: 1;">&times;</button>
+            </div>
+
+            <EditForm Model="_editModel" OnValidSubmit="HandleUpdateSubmitAsync">
+                <DataAnnotationsValidator />
+
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: var(--hys-space-3);">
+                    <div>
+                        <label class="ui-label" style="display: block; font-weight: bold; margin-bottom: 0.25rem;">Ad *</label>
+                        <InputText class="ui-input" @bind-Value="_editModel.FirstName" style="width: 100%;" />
+                        <ValidationMessage For="() => _editModel.FirstName" />
+                    </div>
+                    <div>
+                        <label class="ui-label" style="display: block; font-weight: bold; margin-bottom: 0.25rem;">Soyad *</label>
+                        <InputText class="ui-input" @bind-Value="_editModel.LastName" style="width: 100%;" />
+                        <ValidationMessage For="() => _editModel.LastName" />
+                    </div>
+                </div>
+
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: var(--hys-space-3); margin-top: var(--hys-space-3);">
+                    <div>
+                        <label class="ui-label" style="display: block; font-weight: bold; margin-bottom: 0.25rem;">Doğum Tarihi *</label>
+                        <InputDate class="ui-input" @bind-Value="_editModel.DateOfBirth" style="width: 100%;" />
+                        <ValidationMessage For="() => _editModel.DateOfBirth" />
+                    </div>
+                    <div>
+                        <label class="ui-label" style="display: block; font-weight: bold; margin-bottom: 0.25rem;">Cinsiyet *</label>
+                        <InputSelect class="ui-input" @bind-Value="_editModel.Gender" style="width: 100%;">
+                            <option value="Female">Kadın</option>
+                            <option value="Male">Erkek</option>
+                            <option value="Other">Diğer</option>
+                            <option value="Unspecified">Belirtilmedi</option>
+                        </InputSelect>
+                    </div>
+                </div>
+
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: var(--hys-space-3); margin-top: var(--hys-space-3);">
+                    <div>
+                        <label class="ui-label" style="display: block; font-weight: bold; margin-bottom: 0.25rem;">Sentetik TC Kimlik No</label>
+                        <InputText class="ui-input" @bind-Value="_editModel.NationalIdSynthetic" style="width: 100%;" />
+                    </div>
+                    <div>
+                        <label class="ui-label" style="display: block; font-weight: bold; margin-bottom: 0.25rem;">Telefon Numarası</label>
+                        <InputText class="ui-input" @bind-Value="_editModel.PhoneNumber" style="width: 100%;" />
+                    </div>
+                </div>
+
+                <div style="margin-top: var(--hys-space-3);">
+                    <label class="ui-label" style="display: block; font-weight: bold; margin-bottom: 0.25rem;">E-posta Adresi</label>
+                    <InputText class="ui-input" @bind-Value="_editModel.Email" style="width: 100%;" />
+                </div>
+
+                <h3 style="font-size: 1rem; margin-top: var(--hys-space-4); margin-bottom: var(--hys-space-2); border-bottom: 1px solid var(--hys-color-border); padding-bottom: 0.25rem;">Adres Bilgisi</h3>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: var(--hys-space-3);">
+                    <div>
+                        <label class="ui-label" style="display: block; margin-bottom: 0.25rem;">İl</label>
+                        <InputText class="ui-input" @bind-Value="_editModel.City" style="width: 100%;" />
+                    </div>
+                    <div>
+                        <label class="ui-label" style="display: block; margin-bottom: 0.25rem;">İlçe</label>
+                        <InputText class="ui-input" @bind-Value="_editModel.District" style="width: 100%;" />
+                    </div>
+                </div>
+                <div style="margin-top: var(--hys-space-3);">
+                    <label class="ui-label" style="display: block; margin-bottom: 0.25rem;">Açık Adres</label>
+                    <InputText class="ui-input" @bind-Value="_editModel.AddressLine" style="width: 100%;" />
+                </div>
+
+                <div style="display: flex; gap: var(--hys-space-3); justify-content: flex-end; margin-top: var(--hys-space-5); border-top: 1px solid var(--hys-color-border); padding-top: var(--hys-space-4);">
+                    <button class="ui-button ui-button--secondary" type="button" @onclick="CloseDetailModal">Kapat</button>
+                    <button class="ui-button ui-button--primary" type="submit" disabled="@_isSubmitting">
+                        @(_isSubmitting ? "Güncelleniyor..." : "Değişiklikleri Kaydet")
+                    </button>
+                </div>
+            </EditForm>
+        </div>
+    </div>
+}
+
+@code {
+    private bool _isLoading = true;
+    private bool _isForbidden;
+    private bool _isSubmitting;
+    private string? _errorMessage;
+    private string? _statusMessage;
+    private string? _queryValidationError;
+    private string _searchQuery = string.Empty;
+
+    private PatientListResponse? _patients;
+    private bool _showRegisterModal;
+    private DuplicateCheckResponse? _duplicateCheckResult;
+    private PatientDetailResponse? _selectedPatient;
+
+    private PatientFormModel _regModel = new();
+    private PatientFormModel _editModel = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        await SessionState.EnsureLoadedAsync();
+        if (!SessionState.IsAuthenticated || SessionState.IsPatient)
+        {
+            Navigation.NavigateTo("account/login");
+            return;
+        }
+        await LoadPatientsAsync();
+    }
+
+    private async Task LoadPatientsAsync()
+    {
+        _isLoading = true;
+        _errorMessage = null;
+        _queryValidationError = null;
+        _isForbidden = false;
+
+        try
+        {
+            _patients = await PatientApi.SearchPatientsAsync(_searchQuery);
+            if (_patients is null)
+            {
+                _isForbidden = true;
+            }
+        }
+        catch (Exception)
+        {
+            _errorMessage = "Hasta listesi yüklenemedi. Lütfen bağlantınızı kontrol edip yeniden deneyin.";
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+    }
+
+    private async Task SearchAsync()
+    {
+        _queryValidationError = null;
+
+        if (!string.IsNullOrWhiteSpace(_searchQuery) && _searchQuery.Trim().Length < 2)
+        {
+            _queryValidationError = "Arama terimi en az 2 karakter olmalıdır.";
+            return;
+        }
+
+        await LoadPatientsAsync();
+    }
+
+    private async Task ClearSearchAsync()
+    {
+        _searchQuery = string.Empty;
+        _queryValidationError = null;
+        await LoadPatientsAsync();
+    }
+
+    private void OpenRegisterModal()
+    {
+        _regModel = new PatientFormModel
+        {
+            DateOfBirth = new DateOnly(1990, 1, 1),
+            Gender = "Female",
+        };
+        _duplicateCheckResult = null;
+        _showRegisterModal = true;
+    }
+
+    private void CloseRegisterModal()
+    {
+        _showRegisterModal = false;
+        _duplicateCheckResult = null;
+    }
+
+    private async Task CheckDuplicateManuallyAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_regModel.FirstName) || string.IsNullOrWhiteSpace(_regModel.LastName))
+        {
+            _statusMessage = "Mükerrer kontrolü için en az Ad ve Soyad girilmelidir.";
+            return;
+        }
+
+        _duplicateCheckResult = await PatientApi.CheckDuplicateAsync(new DuplicatePatientCheckRequest
+        {
+            FirstName = _regModel.FirstName,
+            LastName = _regModel.LastName,
+            DateOfBirth = _regModel.DateOfBirth,
+            NationalIdSynthetic = _regModel.NationalIdSynthetic,
+        });
+
+        if (_duplicateCheckResult?.HasPotentialDuplicate == false)
+        {
+            _statusMessage = "Mükerrer aday bulunamadı. Kayda devam edebilirsiniz.";
+        }
+    }
+
+    private async Task HandleRegisterSubmitAsync()
+    {
+        _isSubmitting = true;
+        _errorMessage = null;
+        _statusMessage = null;
+
+        try
+        {
+            // Kayıt öncesi hızlı duplicate kontrolü
+            _duplicateCheckResult = await PatientApi.CheckDuplicateAsync(new DuplicatePatientCheckRequest
+            {
+                FirstName = _regModel.FirstName,
+                LastName = _regModel.LastName,
+                DateOfBirth = _regModel.DateOfBirth,
+                NationalIdSynthetic = _regModel.NationalIdSynthetic,
+            });
+
+            var request = new PatientRegistrationRequest
+            {
+                PersonId = Guid.NewGuid(),
+                FirstName = _regModel.FirstName,
+                LastName = _regModel.LastName,
+                DateOfBirth = _regModel.DateOfBirth,
+                Gender = _regModel.Gender,
+                NationalIdSynthetic = _regModel.NationalIdSynthetic,
+                PhoneNumber = _regModel.PhoneNumber,
+                Email = _regModel.Email,
+                Address = string.IsNullOrWhiteSpace(_regModel.City) ? null : new AddressDto(
+                    _regModel.City,
+                    _regModel.District ?? string.Empty,
+                    _regModel.AddressLine ?? string.Empty,
+                    "00000"),
+                EmergencyContact = string.IsNullOrWhiteSpace(_regModel.EmergencyContactName) ? null : new EmergencyContactDto(
+                    _regModel.EmergencyContactName,
+                    _regModel.EmergencyContactRelationship ?? "Yakını",
+                    _regModel.EmergencyContactPhone ?? string.Empty),
+                CommunicationPreferences = new CommunicationPreferencesDto(true, true, "tr"),
+            };
+
+            var (succeeded, patient, error) = await PatientApi.RegisterPatientAsync(request);
+            if (succeeded && patient is not null)
+            {
+                _statusMessage = $"Hasta başarıyla kaydedildi! MRN: {patient.MedicalRecordNumber}";
+                CloseRegisterModal();
+                await LoadPatientsAsync();
+            }
+            else
+            {
+                _errorMessage = error ?? "Hasta kaydedilemedi.";
+            }
+        }
+        catch (Exception)
+        {
+            _errorMessage = "Hasta kaydı tamamlanamadı. Lütfen bağlantınızı kontrol edip yeniden deneyin.";
+        }
+        finally
+        {
+            _isSubmitting = false;
+        }
+    }
+
+    private async Task ViewPatientDetailsAsync(Guid patientId)
+    {
+        _isLoading = true;
+        try
+        {
+            _selectedPatient = await PatientApi.GetPatientByIdAsync(patientId);
+            if (_selectedPatient is not null)
+            {
+                _editModel = new PatientFormModel
+                {
+                    FirstName = _selectedPatient.FirstName,
+                    LastName = _selectedPatient.LastName,
+                    DateOfBirth = _selectedPatient.DateOfBirth,
+                    Gender = _selectedPatient.Gender,
+                    NationalIdSynthetic = _selectedPatient.NationalIdSynthetic,
+                    PhoneNumber = _selectedPatient.PhoneNumber,
+                    Email = _selectedPatient.Email,
+                    City = _selectedPatient.Address?.City,
+                    District = _selectedPatient.Address?.District,
+                    AddressLine = _selectedPatient.Address?.Line1,
+                    EmergencyContactName = _selectedPatient.EmergencyContact?.FullName,
+                    EmergencyContactRelationship = _selectedPatient.EmergencyContact?.Relationship,
+                    EmergencyContactPhone = _selectedPatient.EmergencyContact?.PhoneNumber,
+                };
+            }
+        }
+        catch (Exception)
+        {
+            _errorMessage = "Hasta detayı yüklenemedi. Lütfen bağlantınızı kontrol edip yeniden deneyin.";
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+    }
+
+    private void CloseDetailModal()
+    {
+        _selectedPatient = null;
+    }
+
+    private async Task HandleUpdateSubmitAsync()
+    {
+        if (_selectedPatient is null)
+        {
+            return;
+        }
+
+        _isSubmitting = true;
+        _errorMessage = null;
+        _statusMessage = null;
+
+        try
+        {
+            var updateRequest = new PatientUpdateRequest
+            {
+                FirstName = _editModel.FirstName,
+                LastName = _editModel.LastName,
+                DateOfBirth = _editModel.DateOfBirth,
+                Gender = _editModel.Gender,
+                NationalIdSynthetic = _editModel.NationalIdSynthetic,
+                PhoneNumber = _editModel.PhoneNumber,
+                Email = _editModel.Email,
+                Address = string.IsNullOrWhiteSpace(_editModel.City) ? null : new AddressDto(
+                    _editModel.City,
+                    _editModel.District ?? string.Empty,
+                    _editModel.AddressLine ?? string.Empty,
+                    "00000"),
+                EmergencyContact = string.IsNullOrWhiteSpace(_editModel.EmergencyContactName) ? null : new EmergencyContactDto(
+                    _editModel.EmergencyContactName,
+                    _editModel.EmergencyContactRelationship ?? "Yakını",
+                    _editModel.EmergencyContactPhone ?? string.Empty),
+                CommunicationPreferences = new CommunicationPreferencesDto(true, true, "tr"),
+            };
+
+            var (succeeded, patient, error) = await PatientApi.UpdatePatientAsync(
+                _selectedPatient.Id,
+                updateRequest,
+                _selectedPatient.Version);
+
+            if (succeeded && patient is not null)
+            {
+                _statusMessage = $"Hasta bilgileri başarıyla güncellendi (Versiyon: {patient.Version}).";
+                CloseDetailModal();
+                await LoadPatientsAsync();
+            }
+            else
+            {
+                _errorMessage = error ?? "Hasta bilgileri güncellenemedi.";
+            }
+        }
+        catch (Exception)
+        {
+            _errorMessage = "Hasta kaydı güncellenemedi. Lütfen bağlantınızı kontrol edip yeniden deneyin.";
+        }
+        finally
+        {
+            _isSubmitting = false;
+        }
+    }
+
+    public sealed class PatientFormModel
+    {
+        [System.ComponentModel.DataAnnotations.Required(ErrorMessage = "Ad alanı zorunludur.")]
+        public string FirstName { get; set; } = string.Empty;
+
+        [System.ComponentModel.DataAnnotations.Required(ErrorMessage = "Soyad alanı zorunludur.")]
+        public string LastName { get; set; } = string.Empty;
+
+        public DateOnly DateOfBirth { get; set; } = new(1990, 1, 1);
+
+        public string Gender { get; set; } = "Female";
+
+        public string? NationalIdSynthetic { get; set; }
+
+        public string? PhoneNumber { get; set; }
+
+        public string? Email { get; set; }
+
+        public string? City { get; set; }
+
+        public string? District { get; set; }
+
+        public string? AddressLine { get; set; }
+
+        public string? EmergencyContactName { get; set; }
+
+        public string? EmergencyContactRelationship { get; set; }
+
+        public string? EmergencyContactPhone { get; set; }
+    }
+}

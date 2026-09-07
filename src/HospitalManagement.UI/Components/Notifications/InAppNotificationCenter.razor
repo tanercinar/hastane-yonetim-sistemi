@@ -1,0 +1,261 @@
+@namespace HospitalManagement.UI.Components.Notifications
+@using HospitalManagement.UI.Components
+@using HospitalManagement.UI.Notifications
+
+<section class="notification-center" role="region" aria-label="Uygulama İçi Bildirim Merkezi">
+    <div class="notification-header">
+        <div class="title-with-badge">
+            <h2 class="center-title">Bildirimler</h2>
+            @if (UnreadCount > 0)
+            {
+                <span class="unread-badge" aria-label="@UnreadCount okunmamış bildirim">@UnreadCount</span>
+            }
+        </div>
+        @if (Notifications.Any(n => !n.IsRead))
+        {
+            <button type="button" class="mark-all-read-btn" @onclick="MarkAllAsRead" aria-label="Tümünü Okundu Olarak İşaretle">
+                Tümünü Okundu İşaretle
+            </button>
+        }
+    </div>
+
+    @if (Notifications.Count == 0)
+    {
+        <EmptyState Title="Bildiriminiz Yok" Description="Şu anda görüntülenecek yeni bir klinik veya operasyonel bildirim bulunmamaktadır." />
+    }
+    else
+    {
+        <ul class="notification-list" role="list">
+            @foreach (var item in Notifications)
+            {
+                <li class="notification-item @(!item.IsRead ? "unread-item" : "")" role="listitem">
+                    <div class="item-top-row">
+                        <span class="category-tag category-@item.Category.ToString().ToLowerInvariant()">
+                            @GetCategoryDisplayName(item.Category)
+                        </span>
+                        <time class="item-time" datetime="@item.CreatedAt.ToString("o")">
+                            @item.CreatedAt.ToString("HH:mm - dd.MM.yyyy")
+                        </time>
+                    </div>
+                    <h3 class="item-title">@item.PublicLockScreenTitle</h3>
+                    <p class="item-detail">@item.AuthenticatedDetail</p>
+                    <div class="item-action-row">
+                        @if (!string.IsNullOrEmpty(item.DeepLinkUrl))
+                        {
+                            <button type="button" class="action-link-btn" @onclick="() => HandleNotificationClickAsync(item)" aria-label="Ayrıntıları Görüntüle: @item.PublicLockScreenTitle">
+                                İlgili Kayda Git →
+                            </button>
+                        }
+                        @if (!item.IsRead)
+                        {
+                            <button type="button" class="mark-single-btn" @onclick="() => MarkAsRead(item)" aria-label="Okundu Olarak İşaretle">
+                                Okundu
+                            </button>
+                        }
+                    </div>
+                </li>
+            }
+        </ul>
+    }
+</section>
+
+<style>
+    .notification-center {
+        background: #ffffff;
+        border: 1px solid #e2e8f0;
+        border-radius: 12px;
+        padding: 16px;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+        font-family: system-ui, -apple-system, sans-serif;
+    }
+
+    .notification-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 14px;
+        border-bottom: 1px solid #f1f5f9;
+        padding-bottom: 10px;
+    }
+
+    .title-with-badge {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+
+    .center-title {
+        font-size: 1.15rem;
+        font-weight: 700;
+        margin: 0;
+        color: #0f172a;
+    }
+
+    .unread-badge {
+        background: #ef4444;
+        color: #ffffff;
+        font-size: 0.75rem;
+        font-weight: 700;
+        padding: 2px 7px;
+        border-radius: 10px;
+    }
+
+    .mark-all-read-btn {
+        background: none;
+        border: none;
+        color: #0284c7;
+        font-size: 0.85rem;
+        font-weight: 600;
+        cursor: pointer;
+        padding: 4px 8px;
+        border-radius: 4px;
+    }
+
+    .notification-list {
+        list-style: none;
+        padding: 0;
+        margin: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+    }
+
+    .notification-item {
+        border: 1px solid #e2e8f0;
+        border-radius: 8px;
+        padding: 12px;
+        background: #ffffff;
+        transition: background 0.15s ease;
+    }
+
+    .unread-item {
+        background: #f0f9ff;
+        border-color: #bae6fd;
+    }
+
+    .item-top-row {
+        display: flex;
+        justify-content: space-between;
+        font-size: 0.75rem;
+        margin-bottom: 6px;
+    }
+
+    .category-tag {
+        font-weight: 700;
+        padding: 2px 6px;
+        border-radius: 4px;
+        text-transform: uppercase;
+        font-size: 0.7rem;
+    }
+
+    .category-appointment { background: #e0f2fe; color: #0369a1; }
+    .category-prescription { background: #fef3c7; color: #b45309; }
+    .category-diagnosticresult { background: #dcfce7; color: #15803d; }
+    .category-staffurgent { background: #fee2e2; color: #b91c1c; }
+    .category-general { background: #f1f5f9; color: #475569; }
+
+    .item-time {
+        color: #64748b;
+    }
+
+    .item-title {
+        font-size: 0.95rem;
+        font-weight: 700;
+        margin: 0 0 4px 0;
+        color: #0f172a;
+    }
+
+    .item-detail {
+        font-size: 0.85rem;
+        color: #334155;
+        margin: 0 0 8px 0;
+    }
+
+    .item-action-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-top: 6px;
+    }
+
+    .action-link-btn {
+        background: #0284c7;
+        color: #ffffff;
+        border: none;
+        border-radius: 6px;
+        padding: 6px 12px;
+        font-size: 0.8rem;
+        font-weight: 600;
+        cursor: pointer;
+    }
+
+    .mark-single-btn {
+        background: none;
+        border: 1px solid #cbd5e1;
+        border-radius: 6px;
+        color: #64748b;
+        padding: 4px 8px;
+        font-size: 0.75rem;
+        cursor: pointer;
+    }
+
+    @@media (forced-colors: active) {
+        .notification-center, .notification-item {
+            forced-color-adjust: none;
+            background-color: Canvas;
+            color: CanvasText;
+            border-color: CanvasText;
+        }
+        .action-link-btn, .mark-single-btn {
+            border: 1px solid ButtonText;
+        }
+    }
+</style>
+
+@code {
+    [Parameter]
+    public List<SafeNotificationMessage> Notifications { get; set; } = [];
+
+    [Parameter]
+    public EventCallback<SafeNotificationMessage> OnNotificationClick { get; set; }
+
+    [Parameter]
+    public EventCallback<string> OnDeepLinkNavigation { get; set; }
+
+    public int UnreadCount => Notifications.Count(n => !n.IsRead);
+
+    public void MarkAllAsRead()
+    {
+        foreach (var n in Notifications)
+        {
+            n.IsRead = true;
+        }
+    }
+
+    public void MarkAsRead(SafeNotificationMessage notification)
+    {
+        notification.IsRead = true;
+    }
+
+    public async Task HandleNotificationClickAsync(SafeNotificationMessage notification)
+    {
+        notification.IsRead = true;
+        if (OnNotificationClick.HasDelegate)
+        {
+            await OnNotificationClick.InvokeAsync(notification);
+        }
+        if (!string.IsNullOrEmpty(notification.DeepLinkUrl) && OnDeepLinkNavigation.HasDelegate)
+        {
+            await OnDeepLinkNavigation.InvokeAsync(notification.DeepLinkUrl);
+        }
+    }
+
+    private static string GetCategoryDisplayName(SafeNotificationCategory category) => category switch
+    {
+        SafeNotificationCategory.Appointment => "Randevu",
+        SafeNotificationCategory.Prescription => "E-Reçete",
+        SafeNotificationCategory.DiagnosticResult => "Tahlil/Tanı",
+        SafeNotificationCategory.StaffUrgent => "Acil Görev",
+        _ => "Genel"
+    };
+}

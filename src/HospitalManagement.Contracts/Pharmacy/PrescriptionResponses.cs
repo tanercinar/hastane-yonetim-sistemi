@@ -1,0 +1,57 @@
+namespace HospitalManagement.Contracts.Pharmacy;
+
+public sealed record PrescriptionItemResponse(
+    Guid Id,
+    Guid PrescriptionId,
+    Guid MedicationCatalogItemId,
+    string MedicationCode,
+    string BrandName,
+    string GenericName,
+    string Form,
+    string Route,
+    decimal Dose,
+    string DoseUnit,
+    string Frequency,
+    int DurationDays,
+    int Quantity,
+    string QuantityUnit,
+    int DispensedQuantity,
+    bool IsFullyDispensed,
+    string? Instructions);
+
+public sealed record PrescriptionDetailResponse(
+    Guid Id,
+    string PrescriptionNumber,
+    Guid PatientId,
+    Guid EncounterId,
+    Guid PrescribingDoctorId,
+    Guid DepartmentId,
+    string Status,
+    DateTime? ValidUntilUtc,
+    DateTime? SignedAtUtc,
+    Guid? SignedByDoctorId,
+    DateTime? CancelledAtUtc,
+    Guid? CancelledByDoctorId,
+    string? CancellationReason,
+    DateTime? EnteredInErrorAtUtc,
+    Guid? EnteredInErrorByDoctorId,
+    string? EnteredInErrorReason,
+    string? DiagnosisSummary,
+    string? GeneralInstructions,
+    int Version,
+    DateTime CreatedAtUtc,
+    DateTime? UpdatedAtUtc,
+    List<PrescriptionItemResponse> Items);
+
+public sealed record PrescriptionSummaryResponse(
+    Guid Id,
+    string PrescriptionNumber,
+    Guid PatientId,
+    Guid EncounterId,
+    Guid PrescribingDoctorId,
+    Guid DepartmentId,
+    string Status,
+    DateTime? ValidUntilUtc,
+    DateTime? SignedAtUtc,
+    int ItemCount,
+    DateTime CreatedAtUtc);

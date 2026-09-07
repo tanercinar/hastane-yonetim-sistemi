@@ -1,0 +1,960 @@
+@page "/radiology/worklist"
+@using HospitalManagement.Contracts.Diagnostics
+@using HospitalManagement.Web.Client.Diagnostics
+@inject IDiagnosticsApiClient DiagnosticsApi
+
+<div class="container-fluid px-4 py-3" data-testid="radiology-worklist-page">
+    <!-- Header -->
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <div>
+            <h4 class="mb-0 text-primary fw-bold">
+                <i class="bi bi-camera-fill text-primary me-2"></i>Radyoloji İş Listesi ve Raporlama
+            </h4>
+            <p class="text-muted small mb-0">Modalite iş listesi, çekim tamamlama, uzman radyolog raporlama ve ek rapor (addendum) yönetimi</p>
+        </div>
+        <button class="btn btn-outline-primary btn-sm" @onclick="LoadStudiesAsync">
+            <i class="bi bi-arrow-clockwise me-1"></i>Yenile
+        </button>
+    </div>
+
+    <!-- Demo Banner -->
+    <div class="alert alert-info py-2 px-3 d-flex align-items-center mb-3 small shadow-sm" role="alert">
+        <i class="bi bi-info-circle-fill me-2 fs-5"></i>
+        <div>
+            <strong>EĞİTİM VE DEMO AMAÇLIDIR:</strong> Radyoloji görüntüleme modaliteleri ve accession numaraları sentetik simülasyondur. Gerçek PACS/DICOM cihaz bağlantısı içermez.
+        </div>
+    </div>
+
+    @if (!string.IsNullOrWhiteSpace(_errorMessage))
+    {
+        <div class="alert alert-danger alert-dismissible fade show py-2 small" role="alert">
+            <i class="bi bi-exclamation-circle me-1"></i>@_errorMessage
+            <button type="button" class="btn-close btn-sm" @onclick="() => _errorMessage = null"></button>
+        </div>
+    }
+
+    @if (!string.IsNullOrWhiteSpace(_successMessage))
+    {
+        <div class="alert alert-success alert-dismissible fade show py-2 small" role="alert">
+            <i class="bi bi-check-circle me-1"></i>@_successMessage
+            <button type="button" class="btn-close btn-sm" @onclick="() => _successMessage = null"></button>
+        </div>
+    }
+
+    <!-- Filter Bar -->
+    <div class="card shadow-sm border-0 mb-3">
+        <div class="card-body p-3">
+            <div class="row g-2 align-items-center">
+                <div class="col-md-3">
+                    <label class="form-label small text-muted mb-1">Modalite</label>
+                    <select class="form-select form-select-sm" @bind="_selectedModality" @bind:after="LoadStudiesAsync">
+                        <option value="">Tüm Modaliteler</option>
+                        <option value="XR">XR — Direkt Röntgen / Grafi</option>
+                        <option value="CT">CT — Bilgisayarlı Tomografi</option>
+                        <option value="MR">MR — Manyetik Rezonans</option>
+                        <option value="US">US — Ultrasonografi</option>
+                        <option value="MG">MG — Mamografi</option>
+                    </select>
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label small text-muted mb-1">Durum</label>
+                    <select class="form-select form-select-sm" @bind="_selectedStatus" @bind:after="LoadStudiesAsync">
+                        <option value="">Tüm Durumlar</option>
+                        <option value="Ordered">İstem Verildi (Ordered)</option>
+                        <option value="Scheduled">Randevulu (Scheduled)</option>
+                        <option value="Acquired">Çekim Tamamlandı (Acquired)</option>
+                        <option value="ReportDrafted">Taslak Rapor (ReportDrafted)</option>
+                        <option value="ReportFinalized">Rapor Kesinleşti (ReportFinalized)</option>
+                        <option value="AddendumAdded">Ek Raporlu (AddendumAdded)</option>
+                    </select>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    @if (_pendingOrders.Count > 0)
+    {
+        <div class="card shadow-sm border-primary mb-3" data-testid="pending-radiology-orders">
+            <div class="card-header bg-primary-subtle border-primary py-2">
+                <h6 class="mb-0 fw-bold text-primary">
+                    <i class="bi bi-clipboard2-pulse me-1"></i>İş Listesine Alınmayı Bekleyen Radyoloji İstemleri
+                    <span class="badge bg-primary ms-1">@_pendingOrders.Count</span>
+                </h6>
+            </div>
+            <div class="table-responsive">
+                <table class="table table-sm align-middle mb-0 small">
+                    <thead class="table-light">
+                        <tr>
+                            <th>İstem No</th>
+                            <th>Öncelik</th>
+                            <th>Kalem</th>
+                            <th>Tarih</th>
+                            <th class="text-end">İşlem</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var order in _pendingOrders)
+                        {
+                            <tr>
+                                <td class="font-monospace fw-bold">@order.OrderNumber</td>
+                                <td>@order.Priority</td>
+                                <td>@order.ItemCount</td>
+                                <td>@order.CreatedAtUtc.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</td>
+                                <td class="text-end">
+                                    <button type="button"
+                                            class="btn btn-primary btn-sm"
+                                            disabled="@_isSubmitting"
+                                            @onclick="() => InitializeRadiologyOrderAsync(order.Id)">
+                                        <i class="bi bi-list-check me-1"></i>İş Listesine Al
+                                    </button>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    }
+
+    <!-- Studies List -->
+    <div class="card shadow-sm border-0">
+        <div class="card-header bg-white border-bottom py-3">
+            <h6 class="mb-0 fw-bold text-dark">
+                <i class="bi bi-list-task text-primary me-1"></i>Radyoloji Tetkik ve Çekim Listesi
+                @if (_studies.Count > 0)
+                {
+                    <span class="badge bg-primary ms-2">@_studies.Count</span>
+                }
+            </h6>
+        </div>
+        <div class="card-body p-0">
+            @if (_isLoading)
+            {
+                <div class="text-center py-5 text-muted">
+                    <div class="spinner-border spinner-border-sm text-primary me-2" role="status"></div>
+                    <span>Çekimler yükleniyor...</span>
+                </div>
+            }
+            else if (_studies.Count == 0)
+            {
+                <div class="text-center py-5 text-muted">
+                    <i class="bi bi-inbox fs-2 d-block mb-2 text-muted"></i>
+                    <span>Kriterlere uygun radyoloji kaydı bulunamadı.</span>
+                </div>
+            }
+            else
+            {
+                <div class="table-responsive">
+                    <table class="table table-hover align-middle mb-0">
+                        <thead class="table-light small">
+                            <tr>
+                                <th>Accession No</th>
+                                <th>Modalite</th>
+                                <th>İşlem & Bölge</th>
+                                <th>Hasta ID</th>
+                                <th>Durum</th>
+                                <th>Tarih</th>
+                                <th class="text-end">İşlemler</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var study in _studies)
+                            {
+                                <tr>
+                                    <td>
+                                        <span class="font-monospace fw-bold text-primary">@study.AccessionNumber</span>
+                                    </td>
+                                    <td>
+                                        <span class="badge @GetModalityBadgeClass(study.Modality)">@study.Modality</span>
+                                    </td>
+                                    <td>
+                                        <strong class="text-dark">@study.ProcedureName</strong>
+                                        <small class="d-block text-muted">Bölge: @study.BodySite | Kod: @study.ProcedureCode</small>
+                                    </td>
+                                    <td>
+                                        <span class="font-monospace small text-muted">@study.PatientId.ToString().Substring(0, 8)...</span>
+                                    </td>
+                                    <td>
+                                        <span class="badge @GetStatusBadgeClass(study.Status)">@GetStatusText(study.Status)</span>
+                                    </td>
+                                    <td class="small text-muted">
+                                        @study.CreatedAtUtc.ToLocalTime().ToString("dd.MM.yyyy HH:mm")
+                                    </td>
+                                    <td class="text-end">
+                                        @if (study.Status == "Ordered")
+                                        {
+                                            <button class="btn btn-sm btn-outline-primary me-1" @onclick="() => OpenScheduleModal(study.Id)">
+                                                <i class="bi bi-calendar-event me-1"></i>Randevu
+                                            </button>
+                                        }
+                                        else if (study.Status == "Scheduled")
+                                        {
+                                            <button class="btn btn-sm btn-outline-primary me-1" @onclick="() => OpenScheduleModal(study.Id)">
+                                                <i class="bi bi-calendar-event me-1"></i>Randevuyu Değiştir
+                                            </button>
+                                            <button class="btn btn-sm btn-info text-white me-1" @onclick="() => OpenAcquisitionModal(study.Id)">
+                                                <i class="bi bi-camera me-1"></i>Çekimi Tamamla
+                                            </button>
+                                        }
+                                        else if (study.Status == "Acquired" || study.Status == "ReportDrafted")
+                                        {
+                                            <button class="btn btn-sm btn-dark me-1" @onclick="() => OpenDicomViewerAsync(study.Id)">
+                                                <i class="bi bi-display me-1"></i>DICOM Görüntüle
+                                            </button>
+                                            <button class="btn btn-sm btn-warning text-dark me-1" @onclick="() => OpenReportingModal(study.Id)">
+                                                <i class="bi bi-file-earmark-text me-1"></i>Rapor Yaz
+                                            </button>
+                                        }
+                                        else if (study.Status == "ReportFinalized" || study.Status == "AddendumAdded")
+                                        {
+                                            <button class="btn btn-sm btn-dark me-1" @onclick="() => OpenDicomViewerAsync(study.Id)">
+                                                <i class="bi bi-display me-1"></i>DICOM
+                                            </button>
+                                            <button class="btn btn-sm btn-outline-success me-1" @onclick="() => ViewReportModal(study.Id)">
+                                                <i class="bi bi-eye me-1"></i>Raporu Gör
+                                            </button>
+                                            <button class="btn btn-sm btn-outline-secondary me-1" @onclick="() => OpenAddendumModal(study.Id)">
+                                                <i class="bi bi-plus-circle me-1"></i>Ek Rapor
+                                            </button>
+                                        }
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </div>
+    </div>
+</div>
+
+<!-- Schedule Modal -->
+@if (_showScheduleModal && _activeStudyDetail != null)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);" role="dialog">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content shadow border-0">
+                <div class="modal-header bg-primary text-white">
+                    <h6 class="modal-title fw-bold"><i class="bi bi-calendar-event me-2"></i>Çekim Randevusu Belirle</h6>
+                    <button type="button" class="btn-close btn-close-white" @onclick="() => _showScheduleModal = false"></button>
+                </div>
+                <div class="modal-body p-4">
+                    <p class="small text-muted mb-3">
+                        <strong>@_activeStudyDetail.ProcedureName</strong> (@_activeStudyDetail.AccessionNumber) için randevu tarihi belirleyin.
+                    </p>
+                    <div class="mb-3">
+                        <label class="form-label small fw-bold">Randevu Zamanı (UTC/Yerel)</label>
+                        <input type="datetime-local" class="form-control" @bind="_scheduleDateTime" />
+                    </div>
+                </div>
+                <div class="modal-footer bg-light">
+                    <button type="button" class="btn btn-sm btn-secondary" @onclick="() => _showScheduleModal = false">Vazgeç</button>
+                    <button type="button" class="btn btn-sm btn-primary" @onclick="SubmitScheduleAsync" disabled="@_isSubmitting">
+                        <i class="bi bi-check2 me-1"></i>Randevuyu Kaydet
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+<!-- Acquisition Modal -->
+@if (_showAcquisitionModal && _activeStudyDetail != null)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);" role="dialog">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content shadow border-0">
+                <div class="modal-header bg-info text-white">
+                    <h6 class="modal-title fw-bold"><i class="bi bi-camera me-2"></i>Görüntü Çekimini Tamamla</h6>
+                    <button type="button" class="btn-close btn-close-white" @onclick="() => _showAcquisitionModal = false"></button>
+                </div>
+                <div class="modal-body p-4">
+                    <p class="small text-muted mb-3">
+                        <strong>@_activeStudyDetail.ProcedureName</strong> (@_activeStudyDetail.AccessionNumber) için çekim yapıldığını onaylayın.
+                    </p>
+                    <div class="mb-3">
+                        <label class="form-label small fw-bold">Teknisyen Notu / Çekim Protokolü</label>
+                        <textarea class="form-control" rows="3" @bind="_technicianNotes"
+                                  placeholder="Örn: Standart AP/PA pozisyonunda çekim tamamlandı, artefakt izlenmedi."></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer bg-light">
+                    <button type="button" class="btn btn-sm btn-secondary" @onclick="() => _showAcquisitionModal = false">Vazgeç</button>
+                    <button type="button" class="btn btn-sm btn-info text-white" @onclick="SubmitAcquisitionAsync" disabled="@_isSubmitting">
+                        <i class="bi bi-check2 me-1"></i>Çekimi Tamamla & Raporlamaya Gönder
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+<!-- Reporting Modal -->
+@if (_showReportingModal && _activeStudyDetail != null)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);" role="dialog">
+        <div class="modal-dialog modal-lg modal-dialog-centered">
+            <div class="modal-content shadow border-0">
+                <div class="modal-header bg-warning text-dark">
+                    <h6 class="modal-title fw-bold"><i class="bi bi-file-earmark-medical me-2"></i>Radyoloji Raporu Düzenleme</h6>
+                    <button type="button" class="btn-close" @onclick="() => _showReportingModal = false"></button>
+                </div>
+                <div class="modal-body p-4">
+                    <div class="row mb-3 small">
+                        <div class="col-md-6">
+                            <span class="text-muted">İşlem:</span> <strong>@_activeStudyDetail.ProcedureName</strong>
+                        </div>
+                        <div class="col-md-6">
+                            <span class="text-muted">Accession:</span> <strong class="font-monospace">@_activeStudyDetail.AccessionNumber</strong>
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="radiology-report-text" class="form-label small fw-bold text-dark">Bulgular ve Rapor Metni <span class="text-danger">*</span></label>
+                        <textarea id="radiology-report-text" class="form-control" rows="6" @bind="_reportText" @bind:event="oninput"
+                                  placeholder="Radyolojik inceleme bulgularını giriniz..."></textarea>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="radiology-report-impression" class="form-label small fw-bold text-dark">Klinik Sonuç / Kanaat (Impression) <span class="text-danger">*</span></label>
+                        <textarea id="radiology-report-impression" class="form-control" rows="3" @bind="_impression" @bind:event="oninput"
+                                  placeholder="Özet kanaat ve klinik yönlendirme..."></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer bg-light d-flex justify-content-between">
+                    <div>
+                        <button type="button" class="btn btn-sm btn-secondary" @onclick="() => _showReportingModal = false">Kapat</button>
+                    </div>
+                    <div>
+                        <button type="button" class="btn btn-sm btn-outline-warning text-dark me-2" @onclick="SubmitDraftReportAsync" disabled="@(_isSubmitting || string.IsNullOrWhiteSpace(_reportText))">
+                            <i class="bi bi-save me-1"></i>Taslak Kaydet
+                        </button>
+                        <button type="button" class="btn btn-sm btn-success" @onclick="SubmitFinalizeReportAsync" disabled="@(_isSubmitting || string.IsNullOrWhiteSpace(_reportText) || string.IsNullOrWhiteSpace(_impression))">
+                            <i class="bi bi-check-circle me-1"></i>Raporu Kesinleştir
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+<!-- View Report / Addendum Modal -->
+@if (_showViewReportModal && _activeStudyDetail != null)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);" role="dialog">
+        <div class="modal-dialog modal-lg modal-dialog-centered">
+            <div class="modal-content shadow border-0">
+                <div class="modal-header bg-success text-white">
+                    <h6 class="modal-title fw-bold"><i class="bi bi-file-earmark-check me-2"></i>Kesinleşmiş Radyoloji Raporu</h6>
+                    <button type="button" class="btn-close btn-close-white" @onclick="() => _showViewReportModal = false"></button>
+                </div>
+                <div class="modal-body p-4">
+                    <div class="p-3 bg-light rounded mb-3 small">
+                        <div class="row g-2">
+                            <div class="col-md-6"><strong>İşlem:</strong> @_activeStudyDetail.ProcedureName</div>
+                            <div class="col-md-6"><strong>Accession No:</strong> @_activeStudyDetail.AccessionNumber</div>
+                            <div class="col-md-6"><strong>Modalite:</strong> @_activeStudyDetail.Modality</div>
+                            <div class="col-md-6"><strong>Bölge:</strong> @_activeStudyDetail.BodySite</div>
+                            <div class="col-md-6"><strong>Onay Tarihi:</strong> @_activeStudyDetail.ReportFinalizedAtUtc?.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</div>
+                            <div class="col-md-6"><strong>Durum:</strong> <span class="badge @GetStatusBadgeClass(_activeStudyDetail.Status)">@GetStatusText(_activeStudyDetail.Status)</span></div>
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <h6 class="fw-bold text-dark border-bottom pb-1">Bulgular:</h6>
+                        <p class="small text-dark" style="white-space: pre-wrap;">@_activeStudyDetail.ReportText</p>
+                    </div>
+
+                    <div class="mb-3">
+                        <h6 class="fw-bold text-primary border-bottom pb-1">Sonuç / Kanaat (Impression):</h6>
+                        <p class="small text-dark fw-bold" style="white-space: pre-wrap;">@_activeStudyDetail.Impression</p>
+                    </div>
+
+                    @if (!string.IsNullOrWhiteSpace(_activeStudyDetail.AddendumText))
+                    {
+                        <div class="p-3 bg-warning-subtle border border-warning rounded">
+                            <h6 class="fw-bold text-dark mb-1"><i class="bi bi-journal-plus me-1"></i>Ek Raporlar (Addenda):</h6>
+                            <p class="small text-dark mb-0" style="white-space: pre-wrap;">@_activeStudyDetail.AddendumText</p>
+                        </div>
+                    }
+                </div>
+                <div class="modal-footer bg-light">
+                    <button type="button" class="btn btn-sm btn-secondary" @onclick="() => _showViewReportModal = false">Kapat</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+<!-- Add Addendum Modal -->
+@if (_showAddendumModal && _activeStudyDetail != null)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);" role="dialog">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content shadow border-0">
+                <div class="modal-header bg-secondary text-white">
+                    <h6 class="modal-title fw-bold"><i class="bi bi-plus-circle me-2"></i>Ek Rapor (Addendum) Ekle</h6>
+                    <button type="button" class="btn-close btn-close-white" @onclick="() => _showAddendumModal = false"></button>
+                </div>
+                <div class="modal-body p-4">
+                    <p class="small text-muted mb-3">
+                        Kesinleşmiş rapora klinik bütünlüğü bozmadan imzalı ek not (addendum) ekleyin.
+                    </p>
+                    <div class="mb-3">
+                        <label class="form-label small fw-bold">Ek Rapor Metni <span class="text-danger">*</span></label>
+                        <textarea class="form-control" rows="4" @bind="_addendumText"
+                                  placeholder="Örn: Önceki tetkikle kıyaslandığında nodül boyutunda stabilizasyon izlenmiştir."></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer bg-light">
+                    <button type="button" class="btn btn-sm btn-secondary" @onclick="() => _showAddendumModal = false">Vazgeç</button>
+                    <button type="button" class="btn btn-sm btn-primary" @onclick="SubmitAddendumAsync" disabled="@(_isSubmitting || string.IsNullOrWhiteSpace(_addendumText))">
+                        <i class="bi bi-check2 me-1"></i>Ek Raporu Kaydet
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+<!-- DICOM Viewer Modal -->
+@if (_showDicomViewerModal && _dicomMetadata != null)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.8);" role="dialog">
+        <div class="modal-dialog modal-xl modal-dialog-centered" style="max-width: 90vw;">
+            <div class="modal-content shadow-lg border-0 bg-dark text-light">
+                <div class="modal-header border-secondary py-2 px-3 bg-black">
+                    <div class="d-flex align-items-center">
+                        <span class="badge bg-primary me-2">DICOM SIM</span>
+                        <h6 class="modal-title mb-0 font-monospace text-info">
+                            <i class="bi bi-display me-2"></i>@_dicomMetadata.StudyDescription (@_dicomMetadata.AccessionNumber)
+                        </h6>
+                    </div>
+                    <button type="button" class="btn-close btn-close-white" @onclick="() => _showDicomViewerModal = false"></button>
+                </div>
+                <div class="modal-body p-0">
+                    <div class="row g-0" style="min-height: 520px;">
+                        <!-- Series Sidebar -->
+                        <div class="col-md-3 border-end border-secondary bg-black p-3">
+                            <h6 class="small text-uppercase text-secondary fw-bold mb-3">
+                                <i class="bi bi-collection-play me-1"></i>Görüntü Serileri (@_dicomMetadata.Series.Count)
+                            </h6>
+                            <div class="list-group list-group-flush small">
+                                @for (var sIdx = 0; sIdx < _dicomMetadata.Series.Count; sIdx++)
+                                {
+                                    var currentSeries = _dicomMetadata.Series[sIdx];
+                                    var isSelected = sIdx == _selectedSeriesIndex;
+                                    var idxCopy = sIdx;
+                                    <button class="list-group-item list-group-item-action bg-dark text-light border-secondary mb-2 rounded p-2 @(isSelected ? "border-primary bg-secondary bg-opacity-25" : "")"
+                                            @onclick="() => SelectSeriesAsync(idxCopy)">
+                                        <div class="d-flex justify-content-between align-items-center">
+                                            <strong class="text-truncate">@currentSeries.SeriesDescription</strong>
+                                            <span class="badge bg-secondary">#@currentSeries.SeriesNumber</span>
+                                        </div>
+                                        <div class="d-flex justify-content-between text-secondary mt-1 small">
+                                            <span>Modalite: @currentSeries.Modality</span>
+                                            <span>@currentSeries.NumberOfInstances Kesit</span>
+                                        </div>
+                                    </button>
+                                }
+                            </div>
+
+                            @if (ActiveSeries != null)
+                            {
+                                <h6 class="small text-uppercase text-secondary fw-bold mt-4 mb-2">
+                                    <i class="bi bi-images me-1"></i>Kesitler (@ActiveSeries.Instances.Count)
+                                </h6>
+                                <div class="d-flex flex-wrap gap-1">
+                                    @for (var iIdx = 0; iIdx < ActiveSeries.Instances.Count; iIdx++)
+                                    {
+                                        var currentInst = ActiveSeries.Instances[iIdx];
+                                        var isInstSelected = iIdx == _selectedInstanceIndex;
+                                        var instIdxCopy = iIdx;
+                                        <button class="btn btn-sm @(isInstSelected ? "btn-info text-dark fw-bold" : "btn-outline-secondary text-light")"
+                                                style="min-width: 42px;"
+                                                @onclick="() => SelectInstanceAsync(instIdxCopy)">
+                                            #@currentInst.InstanceNumber
+                                        </button>
+                                    }
+                                </div>
+                            }
+                        </div>
+
+                        <!-- Image Viewport Area -->
+                        <div class="col-md-9 d-flex flex-column align-items-center justify-content-center bg-black p-3 position-relative">
+                            @if (_isLoadingImage)
+                            {
+                                <div class="text-center py-5 text-secondary">
+                                    <div class="spinner-border text-info mb-2" role="status"></div>
+                                    <div>DICOM Kesiti Yükleniyor...</div>
+                                </div>
+                            }
+                            else if (!string.IsNullOrWhiteSpace(_previewImageUrl))
+                            {
+                                <div class="w-100 h-100 d-flex align-items-center justify-content-center" style="max-height: 480px;">
+                                    <img src="@_previewImageUrl" alt="Simulated DICOM Slice" class="img-fluid rounded shadow-sm" style="max-height: 100%; object-fit: contain;" />
+                                </div>
+                            }
+                            else
+                            {
+                                <div class="text-muted small">Önizleme yüklenemedi.</div>
+                            }
+
+                            <!-- Controls Toolbar Overlay -->
+                            <div class="position-absolute bottom-0 start-50 translate-middle-x mb-3 bg-dark bg-opacity-75 rounded px-3 py-1 border border-secondary d-flex gap-2 align-items-center small">
+                                <span class="text-secondary small">Kontroller:</span>
+                                <button class="btn btn-sm btn-outline-light py-0 px-2" title="Önceki Kesit" @onclick="PreviousInstance" disabled="@(_selectedInstanceIndex <= 0)">
+                                    <i class="bi bi-chevron-left"></i>
+                                </button>
+                                <span class="font-monospace text-info">@((_selectedInstanceIndex + 1)) / @(ActiveSeries?.Instances.Count ?? 1)</span>
+                                <button class="btn btn-sm btn-outline-light py-0 px-2" title="Sonraki Kesit" @onclick="NextInstance" disabled="@(ActiveSeries == null || _selectedInstanceIndex >= ActiveSeries.Instances.Count - 1)">
+                                    <i class="bi bi-chevron-right"></i>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer border-secondary py-2 bg-black d-flex justify-content-between">
+                    <div class="small text-secondary">
+                        <i class="bi bi-shield-check text-success me-1"></i>Kişiye bağlı, HMAC imzalı 5 dakikalık geçici erişim belirteci aktif
+                    </div>
+                    <button type="button" class="btn btn-sm btn-secondary" @onclick="() => _showDicomViewerModal = false">Kapat</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private List<RadiologyStudySummaryResponse> _studies = [];
+    private List<DiagnosticOrderSummaryResponse> _pendingOrders = [];
+    private RadiologyStudyDetailResponse? _activeStudyDetail;
+    private DicomStudyMetadataResponse? _dicomMetadata;
+
+    private int _selectedSeriesIndex;
+    private int _selectedInstanceIndex;
+    private string? _previewImageUrl;
+    private bool _isLoadingImage;
+    private bool _showDicomViewerModal;
+
+    private DicomSeriesResponse? ActiveSeries =>
+        _dicomMetadata != null && _selectedSeriesIndex < _dicomMetadata.Series.Count
+            ? _dicomMetadata.Series[_selectedSeriesIndex]
+            : null;
+
+    private string? _selectedModality;
+    private string? _selectedStatus;
+
+    private DateTime _scheduleDateTime = DateTime.UtcNow.AddHours(2);
+    private string? _technicianNotes;
+    private string? _reportText;
+    private string? _impression;
+    private string? _addendumText;
+
+    private bool _isLoading;
+    private bool _isSubmitting;
+    private bool _showScheduleModal;
+    private bool _showAcquisitionModal;
+    private bool _showReportingModal;
+    private bool _showViewReportModal;
+    private bool _showAddendumModal;
+
+    private string? _errorMessage;
+    private string? _successMessage;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadStudiesAsync();
+    }
+
+    private async Task LoadStudiesAsync()
+    {
+        _isLoading = true;
+        _errorMessage = null;
+
+        try
+        {
+            _pendingOrders = await DiagnosticsApi.GetDiagnosticOrderWorklistAsync(
+                orderType: "Radiology",
+                status: "Placed",
+                maxResults: 50);
+            _studies = await DiagnosticsApi.GetRadiologyWorklistAsync(_selectedModality, _selectedStatus);
+        }
+        catch (Exception)
+        {
+            _errorMessage = "Radyoloji iş listesi yüklenemedi. Lütfen yeniden deneyin.";
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+    }
+
+    private async Task InitializeRadiologyOrderAsync(Guid orderId)
+    {
+        _isSubmitting = true;
+        _errorMessage = null;
+        _successMessage = null;
+        try
+        {
+            var order = await DiagnosticsApi.GetDiagnosticOrderByIdAsync(orderId);
+            if (order is null || order.OrderType != "Radiology")
+            {
+                _errorMessage = "Radyoloji istemi yüklenemedi veya istem türü geçersiz.";
+                return;
+            }
+
+            var createdCount = 0;
+            foreach (var item in order.Items)
+            {
+                if (await DiagnosticsApi.EnsureRadiologyStudyAsync(order.Id, item.Id) is not null)
+                {
+                    createdCount++;
+                }
+            }
+
+            if (createdCount != order.Items.Count)
+            {
+                _errorMessage = "İstemin tüm kalemleri radyoloji iş listesine alınamadı.";
+                return;
+            }
+
+            _successMessage = $"{order.OrderNumber} numaralı istemin {createdCount} kalemi iş listesine alındı.";
+            await LoadStudiesAsync();
+        }
+        catch (Exception)
+        {
+            _errorMessage = "Radyoloji istemi iş listesine alınamadı. Lütfen yeniden deneyin.";
+        }
+        finally
+        {
+            _isSubmitting = false;
+        }
+    }
+
+    private async Task OpenScheduleModal(Guid id)
+    {
+        _activeStudyDetail = await DiagnosticsApi.GetRadiologyStudyByIdAsync(id);
+        _scheduleDateTime = DateTime.Now.AddHours(1);
+        _showScheduleModal = true;
+    }
+
+    private async Task OpenAcquisitionModal(Guid id)
+    {
+        _activeStudyDetail = await DiagnosticsApi.GetRadiologyStudyByIdAsync(id);
+        _technicianNotes = string.Empty;
+        _showAcquisitionModal = true;
+    }
+
+    private async Task OpenReportingModal(Guid id)
+    {
+        _activeStudyDetail = await DiagnosticsApi.GetRadiologyStudyByIdAsync(id);
+        _reportText = _activeStudyDetail?.ReportText ?? string.Empty;
+        _impression = _activeStudyDetail?.Impression ?? string.Empty;
+        _showReportingModal = true;
+    }
+
+    private async Task ViewReportModal(Guid id)
+    {
+        _activeStudyDetail = await DiagnosticsApi.GetRadiologyStudyByIdAsync(id);
+        _showViewReportModal = true;
+    }
+
+    private async Task OpenAddendumModal(Guid id)
+    {
+        _activeStudyDetail = await DiagnosticsApi.GetRadiologyStudyByIdAsync(id);
+        _addendumText = string.Empty;
+        _showAddendumModal = true;
+    }
+
+    private async Task SubmitScheduleAsync()
+    {
+        if (_activeStudyDetail == null) return;
+        _isSubmitting = true;
+        _errorMessage = null;
+
+        try
+        {
+            var req = new ScheduleRadiologyStudyRequest { ScheduledAtUtc = _scheduleDateTime.ToUniversalTime() };
+            var updated = await DiagnosticsApi.ScheduleRadiologyStudyAsync(_activeStudyDetail.Id, req);
+            if (updated != null)
+            {
+                _showScheduleModal = false;
+                _successMessage = "Randevu başarıyla kaydedildi.";
+                await LoadStudiesAsync();
+            }
+            else
+            {
+                _errorMessage = "Randevu kaydedilemedi.";
+            }
+        }
+        catch (Exception)
+        {
+            _errorMessage = "Çekim randevusu kaydedilemedi. Bilgileri kontrol edip yeniden deneyin.";
+        }
+        finally
+        {
+            _isSubmitting = false;
+        }
+    }
+
+    private async Task SubmitAcquisitionAsync()
+    {
+        if (_activeStudyDetail == null) return;
+        _isSubmitting = true;
+        _errorMessage = null;
+
+        try
+        {
+            var req = new CompleteAcquisitionRequest { TechnicianNotes = _technicianNotes };
+            var updated = await DiagnosticsApi.CompleteRadiologyAcquisitionAsync(_activeStudyDetail.Id, req);
+            if (updated != null)
+            {
+                _showAcquisitionModal = false;
+                _successMessage = "Görüntü çekimi başarıyla tamamlandı ve raporlama havuzuna aktarıldı.";
+                await LoadStudiesAsync();
+            }
+            else
+            {
+                _errorMessage = "Çekim tamamlanamadı.";
+            }
+        }
+        catch (Exception)
+        {
+            _errorMessage = "Görüntü çekimi tamamlanamadı. Lütfen yeniden deneyin.";
+        }
+        finally
+        {
+            _isSubmitting = false;
+        }
+    }
+
+    private async Task SubmitDraftReportAsync()
+    {
+        if (_activeStudyDetail == null || string.IsNullOrWhiteSpace(_reportText)) return;
+        _isSubmitting = true;
+        _errorMessage = null;
+
+        try
+        {
+            var req = new DraftRadiologyReportRequest
+            {
+                ReportText = _reportText.Trim(),
+                Impression = _impression?.Trim(),
+            };
+
+            var updated = await DiagnosticsApi.DraftRadiologyReportAsync(_activeStudyDetail.Id, req);
+            if (updated != null)
+            {
+                _showReportingModal = false;
+                _successMessage = "Rapor taslağı başarıyla kaydedildi.";
+                await LoadStudiesAsync();
+            }
+            else
+            {
+                _errorMessage = "Rapor taslağı kaydedilemedi.";
+            }
+        }
+        catch (Exception)
+        {
+            _errorMessage = "Taslak radyoloji raporu kaydedilemedi. Lütfen yeniden deneyin.";
+        }
+        finally
+        {
+            _isSubmitting = false;
+        }
+    }
+
+    private async Task SubmitFinalizeReportAsync()
+    {
+        if (_activeStudyDetail == null || string.IsNullOrWhiteSpace(_reportText) || string.IsNullOrWhiteSpace(_impression)) return;
+        _isSubmitting = true;
+        _errorMessage = null;
+
+        try
+        {
+            var req = new FinalizeRadiologyReportRequest
+            {
+                ReportText = _reportText.Trim(),
+                Impression = _impression.Trim(),
+            };
+
+            var updated = await DiagnosticsApi.FinalizeRadiologyReportAsync(_activeStudyDetail.Id, req);
+            if (updated != null)
+            {
+                _showReportingModal = false;
+                _successMessage = "Radyoloji raporu başarıyla kesinleştirildi.";
+                await LoadStudiesAsync();
+            }
+            else
+            {
+                _errorMessage = "Rapor kesinleştirilemedi.";
+            }
+        }
+        catch (Exception)
+        {
+            _errorMessage = "Radyoloji raporu kesinleştirilemedi. Lütfen yeniden deneyin.";
+        }
+        finally
+        {
+            _isSubmitting = false;
+        }
+    }
+
+    private async Task SubmitAddendumAsync()
+    {
+        if (_activeStudyDetail == null || string.IsNullOrWhiteSpace(_addendumText)) return;
+        _isSubmitting = true;
+        _errorMessage = null;
+
+        try
+        {
+            var req = new AddRadiologyAddendumRequest
+            {
+                AddendumText = _addendumText.Trim(),
+            };
+
+            var updated = await DiagnosticsApi.AddRadiologyAddendumAsync(_activeStudyDetail.Id, req);
+            if (updated != null)
+            {
+                _showAddendumModal = false;
+                _successMessage = "Ek rapor (addendum) başarıyla eklendi.";
+                await LoadStudiesAsync();
+            }
+            else
+            {
+                _errorMessage = "Ek rapor eklenemedi.";
+            }
+        }
+        catch (Exception)
+        {
+            _errorMessage = "Ek rapor kaydedilemedi. Lütfen yeniden deneyin.";
+        }
+        finally
+        {
+            _isSubmitting = false;
+        }
+    }
+
+    private async Task OpenDicomViewerAsync(Guid studyId)
+    {
+        _errorMessage = null;
+        _isLoadingImage = true;
+        _showDicomViewerModal = true;
+        _selectedSeriesIndex = 0;
+        _selectedInstanceIndex = 0;
+        _previewImageUrl = null;
+
+        try
+        {
+            _dicomMetadata = await DiagnosticsApi.GetDicomStudyMetadataAsync(studyId);
+            if (_dicomMetadata != null && _dicomMetadata.Series.Count > 0)
+            {
+                await LoadCurrentInstancePreviewAsync();
+            }
+            else
+            {
+                _errorMessage = "DICOM metadata kaydı bulunamadı veya çekim henüz tamamlanmadı.";
+            }
+        }
+        catch (Exception)
+        {
+            _errorMessage = "DICOM görüntüleyici açılamadı. Lütfen yeniden deneyin.";
+        }
+        finally
+        {
+            _isLoadingImage = false;
+        }
+    }
+
+    private async Task SelectSeriesAsync(int seriesIdx)
+    {
+        if (_dicomMetadata == null || seriesIdx >= _dicomMetadata.Series.Count) return;
+        _selectedSeriesIndex = seriesIdx;
+        _selectedInstanceIndex = 0;
+        await LoadCurrentInstancePreviewAsync();
+    }
+
+    private async Task SelectInstanceAsync(int instIdx)
+    {
+        if (ActiveSeries == null || instIdx >= ActiveSeries.Instances.Count) return;
+        _selectedInstanceIndex = instIdx;
+        await LoadCurrentInstancePreviewAsync();
+    }
+
+    private async Task NextInstance()
+    {
+        if (ActiveSeries != null && _selectedInstanceIndex < ActiveSeries.Instances.Count - 1)
+        {
+            _selectedInstanceIndex++;
+            await LoadCurrentInstancePreviewAsync();
+        }
+    }
+
+    private async Task PreviousInstance()
+    {
+        if (_selectedInstanceIndex > 0)
+        {
+            _selectedInstanceIndex--;
+            await LoadCurrentInstancePreviewAsync();
+        }
+    }
+
+    private async Task LoadCurrentInstancePreviewAsync()
+    {
+        if (ActiveSeries != null && _selectedInstanceIndex < ActiveSeries.Instances.Count)
+        {
+            var inst = ActiveSeries.Instances[_selectedInstanceIndex];
+            _isLoadingImage = true;
+            try
+            {
+                _previewImageUrl = await DiagnosticsApi.GetDicomPreviewDataUrlAsync(inst.ViewToken);
+                if (string.IsNullOrWhiteSpace(_previewImageUrl))
+                {
+                    _errorMessage = "DICOM önizlemesi güvenli oturum içinde yüklenemedi.";
+                }
+            }
+            finally
+            {
+                _isLoadingImage = false;
+            }
+        }
+    }
+
+    private static string GetModalityBadgeClass(string modality) => modality switch
+    {
+        "XR" => "bg-secondary text-white",
+        "CT" => "bg-primary text-white",
+        "MR" => "bg-purple text-white bg-dark",
+        "US" => "bg-info text-dark",
+        "MG" => "bg-danger text-white",
+        _ => "bg-light text-dark",
+    };
+
+    private static string GetStatusBadgeClass(string status) => status switch
+    {
+        "Ordered" => "bg-secondary text-white",
+        "Scheduled" => "bg-primary text-white",
+        "InProgress" => "bg-warning text-dark",
+        "Acquired" => "bg-info text-white",
+        "ReportDrafted" => "bg-warning text-dark",
+        "ReportFinalized" => "bg-success text-white",
+        "AddendumAdded" => "bg-success-subtle text-success border border-success",
+        "Cancelled" => "bg-danger text-white",
+        _ => "bg-light text-dark",
+    };
+
+    private static string GetStatusText(string status) => status switch
+    {
+        "Ordered" => "İstem Verildi",
+        "Scheduled" => "Randevulu",
+        "InProgress" => "Çekimde",
+        "Acquired" => "Çekim Tamamlandı",
+        "ReportDrafted" => "Taslak Rapor",
+        "ReportFinalized" => "Rapor Kesinleşti",
+        "AddendumAdded" => "Ek Raporlu",
+        "Cancelled" => "İptal Edildi",
+        _ => status,
+    };
+}

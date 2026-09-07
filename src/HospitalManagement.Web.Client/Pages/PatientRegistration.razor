@@ -1,0 +1,80 @@
+@page "/account/register"
+@inject IdentityApiClient Identity
+
+<PageTitle>DEMO hasta hesabı oluştur</PageTitle>
+
+<section class="account-shell" aria-labelledby="register-heading">
+    <header class="account-shell__heading">
+        <span class="page-eyebrow">DEMO hasta portalı</span>
+        <h1 id="register-heading">Hasta hesabı oluştur</h1>
+        <p>Yalnız <code>.invalid</code> uzantılı sentetik bir e-posta kullanın.</p>
+    </header>
+
+    <EditForm Model="_model" OnValidSubmit="SubmitAsync" class="account-form">
+        <DataAnnotationsValidator />
+        <ValidationSummary />
+
+        <label for="register-email">DEMO e-posta</label>
+        <InputText id="register-email" @bind-Value="_model.Email" autocomplete="email" />
+
+        <label for="register-password">Parola</label>
+        <InputText id="register-password" @bind-Value="_model.Password" type="password" autocomplete="new-password" />
+        <small>En az 12 karakter; büyük/küçük harf, rakam ve sembol içermelidir.</small>
+
+        <button class="ui-button ui-button--primary" type="submit" disabled="@_isSubmitting">
+            @(_isSubmitting ? "Gönderiliyor…" : "Hesap oluştur")
+        </button>
+    </EditForm>
+
+    @if (_message is not null)
+    {
+        <p class="account-message @(_succeeded ? "account-message--success" : "account-message--error")"
+           role="@(_succeeded ? "status" : "alert")">
+            @_message
+        </p>
+    }
+
+    <nav class="account-links" aria-label="Hesap işlemleri">
+        <a href="account/verify-email">Doğrulama kodunu gir</a>
+        <a href="account/login">Zaten hesabım var</a>
+    </nav>
+</section>
+
+@code {
+    private readonly RegistrationModel _model = new();
+    private bool _isSubmitting;
+    private bool _succeeded;
+    private string? _message;
+
+    private async Task SubmitAsync()
+    {
+        _isSubmitting = true;
+        _message = null;
+        try
+        {
+            var result = await Identity.RegisterPatientAsync(new RegisterPatientRequest
+            {
+                Email = _model.Email,
+                Password = _model.Password,
+            });
+            _succeeded = result.Succeeded;
+            _message = result.Message;
+        }
+        finally
+        {
+            _model.Password = string.Empty;
+            _isSubmitting = false;
+        }
+    }
+
+    private sealed class RegistrationModel
+    {
+        [Required(ErrorMessage = "E-posta zorunludur.")]
+        [EmailAddress(ErrorMessage = "Geçerli bir e-posta girin.")]
+        public string Email { get; set; } = string.Empty;
+
+        [Required(ErrorMessage = "Parola zorunludur.")]
+        [StringLength(128, MinimumLength = 12, ErrorMessage = "Parola en az 12 karakter olmalıdır.")]
+        public string Password { get; set; } = string.Empty;
+    }
+}

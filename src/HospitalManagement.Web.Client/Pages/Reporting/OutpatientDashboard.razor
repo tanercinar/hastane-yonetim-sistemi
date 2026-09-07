@@ -1,0 +1,296 @@
+@page "/reporting/outpatient"
+@using HospitalManagement.Contracts.Reporting
+@using HospitalManagement.Web.Client.Identity
+@using HospitalManagement.Web.Client.Reporting
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.SignalR.Client
+@attribute [Authorize]
+@implements IAsyncDisposable
+@inject IReportingApiClient ReportingClient
+@inject UserSessionState SessionState
+@inject NavigationManager Navigation
+
+<PageTitle>Poliklinik ve Randevu Panosu — HMS</PageTitle>
+
+<div class="ui-container" style="max-width: 1200px; margin: 0 auto; padding: 1.5rem 1rem;">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; flex-wrap: wrap; gap: 1rem;">
+        <div>
+            <div style="display: flex; align-items: center; gap: 0.5rem;">
+                <h1 style="font-size: 1.5rem; font-weight: 700; color: var(--color-text-main); margin: 0;">Poliklinik ve Randevu Operasyon Panosu</h1>
+                @if (IsConnected)
+                {
+                    <span class="ui-badge ui-badge--success" style="font-size: 0.75rem;">Canlı Senkronize</span>
+                }
+                else if (IsReconnecting)
+                {
+                    <span class="ui-badge ui-badge--warning" style="font-size: 0.75rem;">Yeniden Bağlanıyor</span>
+                }
+                else
+                {
+                    <span class="ui-badge ui-badge--secondary" style="font-size: 0.75rem;">Çevrimdışı / Manuel</span>
+                }
+                @if (LagSeconds.HasValue)
+                {
+                    <span class="ui-badge ui-badge--info" style="font-size: 0.75rem;">Gecikme: @(LagSeconds.Value.ToString("0.0", System.Globalization.CultureInfo.InvariantCulture))s</span>
+                }
+            </div>
+            <p style="font-size: 0.875rem; color: var(--color-text-muted); margin: 0.25rem 0 0 0;">
+                Günlük randevu akışı, bekleme durumu ve hekim/bölüm operasyonel metrikleri
+            </p>
+        </div>
+        <div style="display: flex; align-items: center; gap: 0.75rem;">
+            <input type="date" class="ui-input" style="width: auto;" @bind="SelectedDate" @bind:after="LoadDashboardAsync" />
+            <button type="button" class="ui-button ui-button--secondary" @onclick="LoadDashboardAsync" disabled="@IsLoading">
+                Yenile
+            </button>
+        </div>
+    </div>
+
+    @if (IsForbidden)
+    {
+        <div class="ui-card" style="padding: 2rem; text-align: center; border-left: 4px solid var(--color-danger);">
+            <h2 style="font-size: 1.125rem; font-weight: 600; color: var(--color-danger); margin: 0 0 0.5rem 0;">Erişim Yetkisi Yok</h2>
+            <p style="color: var(--color-text-muted); margin: 0;">Bu operasyon panosunu görüntülemek için gereken yetkiye sahip değilsiniz.</p>
+        </div>
+    }
+    else if (IsLoading)
+    {
+        <div class="ui-card" style="padding: 3rem; text-align: center;">
+            <div class="ui-spinner" style="margin: 0 auto 1rem auto;"></div>
+            <p style="color: var(--color-text-muted); margin: 0;">Poliklinik metrikleri yükleniyor...</p>
+        </div>
+    }
+    else if (!string.IsNullOrEmpty(ErrorMessage))
+    {
+        <div class="ui-card" style="padding: 2rem; text-align: center; border-left: 4px solid var(--color-danger);">
+            <h2 style="font-size: 1.125rem; font-weight: 600; color: var(--color-danger); margin: 0 0 0.5rem 0;">Hata Oluştu</h2>
+            <p style="color: var(--color-text-muted); margin: 0 0 1rem 0;">@ErrorMessage</p>
+            <button type="button" class="ui-button ui-button--primary" @onclick="LoadDashboardAsync">Tekrar Dene</button>
+        </div>
+    }
+    else if (Summary is null || Summary.TotalAppointments == 0)
+    {
+        <div class="ui-card" style="padding: 3rem; text-align: center;">
+            <h2 style="font-size: 1.125rem; font-weight: 600; color: var(--color-text-main); margin: 0 0 0.5rem 0;">Seçili Günde Randevu Kaydı Yok</h2>
+            <p style="color: var(--color-text-muted); margin: 0;">@SelectedDate.ToString("dd.MM.yyyy") tarihi için kayıtlı poliklinik metrik verisi bulunamadı.</p>
+        </div>
+    }
+    else
+    {
+        <!-- KPI Summary Cards -->
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 1rem; margin-bottom: 1.5rem;">
+            <div class="ui-card" style="padding: 1.25rem;">
+                <span style="font-size: 0.75rem; font-weight: 600; color: var(--color-text-muted); text-transform: uppercase;">Toplam Randevu</span>
+                <div style="font-size: 1.75rem; font-weight: 700; color: var(--color-text-main); margin-top: 0.25rem;">@Summary.TotalAppointments</div>
+            </div>
+            <div class="ui-card" style="padding: 1.25rem;">
+                <span style="font-size: 0.75rem; font-weight: 600; color: var(--color-primary); text-transform: uppercase;">Bekleyen / Kuyruk</span>
+                <div style="font-size: 1.75rem; font-weight: 700; color: var(--color-primary); margin-top: 0.25rem;">@Summary.WaitingQueueCount</div>
+            </div>
+            <div class="ui-card" style="padding: 1.25rem;">
+                <span style="font-size: 0.75rem; font-weight: 600; color: var(--color-warning); text-transform: uppercase;">Giriş Yapmış</span>
+                <div style="font-size: 1.75rem; font-weight: 700; color: var(--color-warning); margin-top: 0.25rem;">@Summary.CheckedInCount</div>
+            </div>
+            <div class="ui-card" style="padding: 1.25rem;">
+                <span style="font-size: 0.75rem; font-weight: 600; color: #3b82f6; text-transform: uppercase;">Muayenede</span>
+                <div style="font-size: 1.75rem; font-weight: 700; color: #3b82f6; margin-top: 0.25rem;">@Summary.InProgressCount</div>
+            </div>
+            <div class="ui-card" style="padding: 1.25rem;">
+                <span style="font-size: 0.75rem; font-weight: 600; color: var(--color-success); text-transform: uppercase;">Tamamlanan</span>
+                <div style="font-size: 1.75rem; font-weight: 700; color: var(--color-success); margin-top: 0.25rem;">@Summary.CompletedCount</div>
+            </div>
+            <div class="ui-card" style="padding: 1.25rem;">
+                <span style="font-size: 0.75rem; font-weight: 600; color: var(--color-danger); text-transform: uppercase;">İptal / Gelmedi</span>
+                <div style="font-size: 1.75rem; font-weight: 700; color: var(--color-danger); margin-top: 0.25rem;">@(Summary.CancelledCount + Summary.NoShowCount)</div>
+            </div>
+        </div>
+
+        <!-- Department Breakdown Table -->
+        <div class="ui-card" style="padding: 1.5rem; margin-bottom: 1.5rem;">
+            <h2 style="font-size: 1.125rem; font-weight: 600; margin: 0 0 1rem 0;">Bölüm Bazlı Randevu Dağılımı</h2>
+            <div style="overflow-x: auto;">
+                <table class="ui-table" style="width: 100%;">
+                    <thead>
+                        <tr>
+                            <th>Bölüm Adı</th>
+                            <th style="text-align: right;">Toplam</th>
+                            <th style="text-align: right;">Planlanan</th>
+                            <th style="text-align: right;">Kayıt / Giriş</th>
+                            <th style="text-align: right;">Muayenede</th>
+                            <th style="text-align: right;">Tamamlanan</th>
+                            <th style="text-align: right;">İptal</th>
+                            <th style="text-align: right;">Gelmedi</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var dept in DepartmentMetrics)
+                        {
+                            <tr>
+                                <td style="font-weight: 500;">@dept.DepartmentName</td>
+                                <td style="text-align: right; font-weight: 600;">@dept.TotalAppointments</td>
+                                <td style="text-align: right;">@dept.ScheduledCount</td>
+                                <td style="text-align: right;">@dept.CheckedInCount</td>
+                                <td style="text-align: right;">@dept.InProgressCount</td>
+                                <td style="text-align: right; color: var(--color-success); font-weight: 600;">@dept.CompletedCount</td>
+                                <td style="text-align: right; color: var(--color-danger);">@dept.CancelledCount</td>
+                                <td style="text-align: right; color: var(--color-danger);">@dept.NoShowCount</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Doctor Breakdown Table -->
+        @if (DoctorMetrics.Count > 0)
+        {
+            <div class="ui-card" style="padding: 1.5rem;">
+                <h2 style="font-size: 1.125rem; font-weight: 600; margin: 0 0 1rem 0;">Hekim Bazlı İş Yükü</h2>
+                <div style="overflow-x: auto;">
+                    <table class="ui-table" style="width: 100%;">
+                        <thead>
+                            <tr>
+                                <th>Hekim Adı</th>
+                                <th>Bölüm</th>
+                                <th style="text-align: right;">Toplam Randevu</th>
+                                <th style="text-align: right;">Tamamlanan</th>
+                                <th style="text-align: right;">Bekleyen Hasta</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var doc in DoctorMetrics)
+                            {
+                                <tr>
+                                    <td style="font-weight: 500;">@doc.DoctorName</td>
+                                    <td>@doc.DepartmentName</td>
+                                    <td style="text-align: right; font-weight: 600;">@doc.TotalAppointments</td>
+                                    <td style="text-align: right; color: var(--color-success); font-weight: 600;">@doc.CompletedCount</td>
+                                    <td style="text-align: right; color: var(--color-warning); font-weight: 600;">@doc.WaitingCount</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        }
+    }
+</div>
+
+@code {
+    private DateOnly SelectedDate { get; set; } = DateOnly.FromDateTime(DateTime.UtcNow);
+    private bool IsLoading { get; set; } = true;
+    private bool IsForbidden { get; set; }
+    private string? ErrorMessage { get; set; }
+    private double? LagSeconds { get; set; }
+
+    private OutpatientDashboardSummaryResponse? Summary { get; set; }
+    private List<OutpatientDepartmentMetricResponse> DepartmentMetrics { get; set; } = [];
+    private List<OutpatientDoctorMetricResponse> DoctorMetrics { get; set; } = [];
+
+    private HubConnection? _hubConnection;
+    private bool IsConnected => _hubConnection?.State == HubConnectionState.Connected;
+    private bool IsReconnecting => _hubConnection?.State == HubConnectionState.Reconnecting;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadDashboardAsync();
+        await StartSignalRAsync();
+    }
+
+    private async Task StartSignalRAsync()
+    {
+        try
+        {
+            _hubConnection = new HubConnectionBuilder()
+                .WithUrl(Navigation.ToAbsoluteUri("/hubs/hospital"))
+                .WithAutomaticReconnect()
+                .Build();
+
+            _hubConnection.On<ReportingDashboardRealtimeUpdate>("ReportingDashboardUpdated", async update =>
+            {
+                if (update.MetricDate == SelectedDate && (update.DashboardType.Equals("outpatient", StringComparison.OrdinalIgnoreCase) || update.DashboardType.Equals("all", StringComparison.OrdinalIgnoreCase)))
+                {
+                    await InvokeAsync(async () =>
+                    {
+                        await LoadDashboardAsync();
+                        StateHasChanged();
+                    });
+                }
+            });
+
+            _hubConnection.Reconnected += async _ =>
+            {
+                await InvokeAsync(async () =>
+                {
+                    await LoadDashboardAsync();
+                    StateHasChanged();
+                });
+            };
+
+            await _hubConnection.StartAsync();
+        }
+        catch
+        {
+            // Graceful fallback: UI functions in manual refresh mode if SignalR is unavailable
+        }
+    }
+
+    private async Task LoadDashboardAsync()
+    {
+        IsLoading = true;
+        IsForbidden = false;
+        ErrorMessage = null;
+
+        try
+        {
+            var summaryTask = ReportingClient.GetOutpatientDashboardSummaryAsync(SelectedDate);
+            var deptTask = ReportingClient.GetOutpatientDepartmentMetricsAsync(SelectedDate);
+            var docTask = ReportingClient.GetOutpatientDoctorMetricsAsync(SelectedDate);
+            var lagTask = ReportingClient.GetProjectionLagAsync();
+
+            await Task.WhenAll(summaryTask, deptTask, docTask);
+
+            Summary = await summaryTask;
+            DepartmentMetrics = await deptTask;
+            DoctorMetrics = await docTask;
+
+            try
+            {
+                var lags = await lagTask;
+                var outpatientLag = lags.FirstOrDefault(l => l.ProjectionName.Contains("Outpatient", StringComparison.OrdinalIgnoreCase));
+                LagSeconds = outpatientLag?.LagSeconds;
+            }
+            catch
+            {
+                // Optional lag metric fallback
+            }
+        }
+        catch (HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.Forbidden)
+        {
+            IsForbidden = true;
+        }
+        catch (Exception ex)
+        {
+            ErrorMessage = "Metrikler yüklenirken bir sorun oluştu: " + ex.Message;
+        }
+        finally
+        {
+            IsLoading = false;
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_hubConnection is not null)
+        {
+            try
+            {
+                await _hubConnection.DisposeAsync();
+            }
+            catch
+            {
+                // Ignore disposal errors
+            }
+        }
+    }
+}

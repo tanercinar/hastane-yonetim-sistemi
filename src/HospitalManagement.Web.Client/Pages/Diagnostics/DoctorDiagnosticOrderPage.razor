@@ -1,0 +1,59 @@
+@page "/doctor/diagnostic-orders/{EncounterId:guid}"
+@using HospitalManagement.Contracts.ClinicalRecords
+@using HospitalManagement.Web.Client.Diagnostics
+@inject IDiagnosticsApiClient DiagnosticsApi
+
+<PageTitle>Tanısal İstem Yönetimi</PageTitle>
+
+<main class="container-fluid px-4 py-3" aria-labelledby="diagnostic-order-page-heading">
+    <h1 id="diagnostic-order-page-heading" class="h4 mb-3">Klinik Tanısal İstem Yönetimi</h1>
+
+    @if (_isLoading)
+    {
+        <div class="d-flex align-items-center gap-2 py-5" role="status">
+            <span class="spinner-border spinner-border-sm" aria-hidden="true"></span>
+            <span>Karşılaşma bilgileri yükleniyor…</span>
+        </div>
+    }
+    else if (_encounter is null)
+    {
+        <div class="alert alert-warning" role="alert">
+            Karşılaşma bulunamadı veya bu kaynağa erişim yetkiniz yok.
+        </div>
+    }
+    else
+    {
+        <DoctorDiagnosticOrderEditor
+            EncounterId="_encounter.Id"
+            PatientId="_encounter.PatientId"
+            DepartmentId="_encounter.DepartmentId"
+            IsReadOnly="@(_encounter.Status != "InProgress")" />
+    }
+</main>
+
+@code {
+    [Parameter]
+    public Guid EncounterId { get; set; }
+
+    private EncounterDetailResponse? _encounter;
+    private bool _isLoading = true;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _isLoading = true;
+        try
+        {
+            _encounter = EncounterId == Guid.Empty
+                ? null
+                : await DiagnosticsApi.GetEncounterAsync(EncounterId);
+        }
+        catch (Exception)
+        {
+            _encounter = null;
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+    }
+}

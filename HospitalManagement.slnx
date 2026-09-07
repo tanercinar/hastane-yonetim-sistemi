@@ -1,0 +1,35 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/HospitalManagement.BuildingBlocks/HospitalManagement.BuildingBlocks.csproj" />
+    <Project Path="src/HospitalManagement.Contracts/HospitalManagement.Contracts.csproj" />
+    <Project Path="src/HospitalManagement.Host/HospitalManagement.Host.csproj" />
+    <Project Path="src/HospitalManagement.Maui/HospitalManagement.Maui.csproj" />
+    <Project Path="src/HospitalManagement.UI/HospitalManagement.UI.csproj" />
+    <Project Path="src/HospitalManagement.Web.Client/HospitalManagement.Web.Client.csproj" />
+  </Folder>
+  <Folder Name="/src/Modules/">
+    <Project Path="src/Modules/AuditPrivacy/HospitalManagement.Modules.AuditPrivacy.csproj" />
+    <Project Path="src/Modules/ClinicalRecords/HospitalManagement.Modules.ClinicalRecords.csproj" />
+    <Project Path="src/Modules/Diagnostics/HospitalManagement.Modules.Diagnostics.csproj" />
+    <Project Path="src/Modules/Emergency/HospitalManagement.Modules.Emergency.csproj" />
+    <Project Path="src/Modules/IdentityAccess/HospitalManagement.Modules.IdentityAccess.csproj" />
+    <Project Path="src/Modules/Inpatient/HospitalManagement.Modules.Inpatient.csproj" />
+    <Project Path="src/Modules/Interoperability/HospitalManagement.Modules.Interoperability.csproj" />
+    <Project Path="src/Modules/Inventory/HospitalManagement.Modules.Inventory.csproj" />
+    <Project Path="src/Modules/Notifications/HospitalManagement.Modules.Notifications.csproj" />
+    <Project Path="src/Modules/Organization/HospitalManagement.Modules.Organization.csproj" />
+    <Project Path="src/Modules/Patients/HospitalManagement.Modules.Patients.csproj" />
+    <Project Path="src/Modules/Pharmacy/HospitalManagement.Modules.Pharmacy.csproj" />
+    <Project Path="src/Modules/Reporting/HospitalManagement.Modules.Reporting.csproj" />
+    <Project Path="src/Modules/Scheduling/HospitalManagement.Modules.Scheduling.csproj" />
+    <Project Path="src/Modules/SpecialtyCare/HospitalManagement.Modules.SpecialtyCare.csproj" />
+    <Project Path="src/Modules/SurgeryCriticalCare/HospitalManagement.Modules.SurgeryCriticalCare.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/HospitalManagement.ArchitectureTests/HospitalManagement.ArchitectureTests.csproj" />
+    <Project Path="tests/HospitalManagement.ComponentTests/HospitalManagement.ComponentTests.csproj" />
+    <Project Path="tests/HospitalManagement.EndToEndTests/HospitalManagement.EndToEndTests.csproj" />
+    <Project Path="tests/HospitalManagement.IntegrationTests/HospitalManagement.IntegrationTests.csproj" />
+    <Project Path="tests/HospitalManagement.UnitTests/HospitalManagement.UnitTests.csproj" />
+  </Folder>
+</Solution>

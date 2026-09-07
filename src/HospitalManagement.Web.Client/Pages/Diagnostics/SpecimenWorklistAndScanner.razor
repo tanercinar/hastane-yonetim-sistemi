@@ -1,0 +1,707 @@
+@page "/laboratory/specimens"
+@using HospitalManagement.Contracts.Diagnostics
+@using HospitalManagement.Web.Client.Diagnostics
+@inject IDiagnosticsApiClient DiagnosticsApi
+
+<div class="container-fluid px-4 py-3" data-testid="specimen-worklist-page">
+    <!-- Header -->
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <div>
+            <h4 class="mb-0 text-dark fw-bold">
+                <i class="bi bi-upc-scan text-primary me-2"></i>Numune ve Barkod Takip Zinciri
+            </h4>
+            <p class="text-muted small mb-0">Laboratuvar numune kabul, devir-teslim, taşıma ve red yönetimi</p>
+        </div>
+        <button class="btn btn-outline-primary btn-sm" @onclick="LoadWorklistAsync">
+            <i class="bi bi-arrow-clockwise me-1"></i>Yenile
+        </button>
+    </div>
+
+    <!-- Demo Banner -->
+    <div class="alert alert-warning py-2 px-3 d-flex align-items-center mb-3 small shadow-sm" role="alert">
+        <i class="bi bi-shield-exclamation me-2 fs-5"></i>
+        <div>
+            <strong>EĞİTİM VE DEMO AMAÇLIDIR:</strong> Bu ekran sentetik numune barkodları ve simüle devir-teslim zinciri üretir. Gerçek laboratuvar analizörü entegrasyonu içermez.
+        </div>
+    </div>
+
+    @if (!string.IsNullOrWhiteSpace(_errorMessage))
+    {
+        <div class="alert alert-danger alert-dismissible fade show py-2 small" role="alert">
+            <i class="bi bi-exclamation-circle me-1"></i>@_errorMessage
+            <button type="button" class="btn-close btn-sm" @onclick="() => _errorMessage = null"></button>
+        </div>
+    }
+
+    @if (!string.IsNullOrWhiteSpace(_successMessage))
+    {
+        <div class="alert alert-success alert-dismissible fade show py-2 small" role="alert">
+            <i class="bi bi-check-circle me-1"></i>@_successMessage
+            <button type="button" class="btn-close btn-sm" @onclick="() => _successMessage = null"></button>
+        </div>
+    }
+
+    <!-- Barcode Scanner & Search Bar -->
+    <div class="card shadow-sm border-0 mb-4 bg-light">
+        <div class="card-body p-3">
+            <div class="row g-2 align-items-center">
+                <div class="col-md-5">
+                    <div class="input-group">
+                        <span class="input-group-text bg-white"><i class="bi bi-upc-scan text-primary"></i></span>
+                        <input type="text"
+                               class="form-control"
+                               placeholder="Barkod okutun veya yazın (Örn: DEMO-SMP-...)"
+                               @bind="_barcodeInput"
+                               @onkeyup="OnBarcodeKeyUp" />
+                        <button class="btn btn-primary" type="button" @onclick="ScanBarcodeAsync">
+                            <i class="bi bi-search me-1"></i>Sorgula
+                        </button>
+                    </div>
+                </div>
+                <div class="col-md-4">
+                    <select class="form-select" @bind="_selectedStatusFilter" @bind:after="LoadWorklistAsync">
+                        <option value="">Tüm Durumlar</option>
+                        <option value="Collected">Toplandı / Alındı</option>
+                        <option value="InTransit">Taşımada / Kuryede</option>
+                        <option value="Received">Laboratuvarda Kabul Edildi</option>
+                        <option value="Rejected">Reddedildi</option>
+                        <option value="Processing">Çalışmada</option>
+                        <option value="Completed">Tamamlandı</option>
+                        <option value="Disposed">İmha Edildi</option>
+                    </select>
+                </div>
+                <div class="col-md-3 text-end">
+                    <span class="badge bg-secondary py-2 px-3 fs-7">
+                        Toplam @_specimens.Count Numune
+                    </span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    @if (_pendingOrders.Count > 0)
+    {
+        <div class="card shadow-sm border-primary mb-4" data-testid="pending-laboratory-orders">
+            <div class="card-header bg-primary-subtle border-primary py-2">
+                <h6 class="mb-0 fw-bold text-primary">
+                    <i class="bi bi-clipboard2-pulse me-1"></i>Numune Bekleyen Laboratuvar İstemleri
+                    <span class="badge bg-primary ms-1">@_pendingOrders.Count</span>
+                </h6>
+            </div>
+            <div class="table-responsive">
+                <table class="table table-sm align-middle mb-0 small">
+                    <thead class="table-light">
+                        <tr>
+                            <th>İstem No</th>
+                            <th>Öncelik</th>
+                            <th>Kalem</th>
+                            <th>Tarih</th>
+                            <th class="text-end">İşlem</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var order in _pendingOrders)
+                        {
+                            <tr>
+                                <td class="font-monospace fw-bold">@order.OrderNumber</td>
+                                <td>@order.Priority</td>
+                                <td>@order.ItemCount</td>
+                                <td>@order.CreatedAtUtc.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</td>
+                                <td class="text-end">
+                                    <button type="button" class="btn btn-primary btn-sm" @onclick="() => OpenCollectionModalAsync(order.Id)">
+                                        <i class="bi bi-droplet-half me-1"></i>Numune Al ve Barkodla
+                                    </button>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    }
+
+    <!-- Scanned Specimen Detail Box -->
+    @if (_scannedSpecimen is not null)
+    {
+        <div class="card shadow-sm border-primary mb-4">
+            <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center py-2">
+                <h6 class="mb-0 fs-6">
+                    <i class="bi bi-upc me-2"></i>Barkod Detayı: @_scannedSpecimen.Barcode
+                </h6>
+                <button type="button" class="btn-close btn-close-white btn-sm" @onclick="() => _scannedSpecimen = null"></button>
+            </div>
+            <div class="card-body p-3">
+                <div class="row g-3">
+                    <div class="col-md-3">
+                        <div class="small text-muted">Numune / Tüp Türü</div>
+                        <div class="fw-bold text-dark">@_scannedSpecimen.SpecimenType</div>
+                        <div class="small text-secondary">@_scannedSpecimen.ContainerType</div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="small text-muted">Durum</div>
+                        <div>
+                            <span class="badge @GetStatusBadgeClass(_scannedSpecimen.Status) px-2 py-1">
+                                @GetStatusText(_scannedSpecimen.Status)
+                            </span>
+                        </div>
+                        @if (!string.IsNullOrWhiteSpace(_scannedSpecimen.RejectionReason))
+                        {
+                            <div class="text-danger small mt-1">
+                                <strong>Red Nedeni:</strong> @_scannedSpecimen.RejectionReason
+                            </div>
+                        }
+                    </div>
+                    <div class="col-md-3">
+                        <div class="small text-muted">Alınma Zamanı</div>
+                        <div class="small text-dark fw-bold">
+                            @(_scannedSpecimen.CollectedAtUtc?.ToLocalTime().ToString("dd.MM.yyyy HH:mm") ?? "-")
+                        </div>
+                    </div>
+                    <div class="col-md-3 text-end">
+                        <div class="small text-muted mb-1">Hızlı İşlemler</div>
+                        @if (_scannedSpecimen.Status == "Collected")
+                        {
+                            <button class="btn btn-outline-warning btn-sm me-1" @onclick="() => TransitSpecimenAsync(_scannedSpecimen.Id)">
+                                <i class="bi bi-truck me-1"></i>Taşımaya Ver
+                            </button>
+                            <button class="btn btn-success btn-sm me-1" @onclick="() => ReceiveSpecimenAsync(_scannedSpecimen.Id)">
+                                <i class="bi bi-check2-circle me-1"></i>Kabul Et
+                            </button>
+                            <button class="btn btn-outline-danger btn-sm" @onclick="() => OpenRejectModal(_scannedSpecimen.Id, _scannedSpecimen.Barcode)">
+                                <i class="bi bi-x-circle me-1"></i>Reddet
+                            </button>
+                        }
+                        else if (_scannedSpecimen.Status == "InTransit")
+                        {
+                            <button class="btn btn-success btn-sm me-1" @onclick="() => ReceiveSpecimenAsync(_scannedSpecimen.Id)">
+                                <i class="bi bi-check2-circle me-1"></i>Laboratuvara Kabul Et
+                            </button>
+                            <button class="btn btn-outline-danger btn-sm" @onclick="() => OpenRejectModal(_scannedSpecimen.Id, _scannedSpecimen.Barcode)">
+                                <i class="bi bi-x-circle me-1"></i>Reddet
+                            </button>
+                        }
+                        else if (_scannedSpecimen.Status == "Received")
+                        {
+                            <span class="badge bg-success py-2 px-3">Kabul Edildi</span>
+                            <button class="btn btn-outline-danger btn-sm ms-2" @onclick="() => OpenRejectModal(_scannedSpecimen.Id, _scannedSpecimen.Barcode)">
+                                <i class="bi bi-x-circle me-1"></i>Reddet
+                            </button>
+                        }
+                    </div>
+                </div>
+
+                <!-- Custody Timeline -->
+                <div class="mt-3 pt-3 border-top">
+                    <h6 class="small fw-bold text-muted mb-2">
+                        <i class="bi bi-clock-history me-1"></i>Devir Teslim Zinciri (Custody Chain)
+                    </h6>
+                    <div class="list-group list-group-flush border rounded small">
+                        @foreach (var ev in _scannedSpecimen.Transitions)
+                        {
+                            <div class="list-group-item d-flex justify-content-between align-items-center py-2">
+                                <div>
+                                    <div class="fw-bold">
+                                        <i class="bi bi-arrow-right-short text-primary me-1"></i>@GetStatusText(ev.ToStatus)
+                                        <span class="badge bg-light text-dark border ms-2">@ev.ActorRole</span>
+                                        @if (!string.IsNullOrWhiteSpace(ev.Location))
+                                        {
+                                            <span class="text-muted ms-2"><i class="bi bi-geo-alt me-1"></i>@ev.Location</span>
+                                        }
+                                    </div>
+                                    @if (!string.IsNullOrWhiteSpace(ev.Notes))
+                                    {
+                                        <div class="text-secondary" style="font-size: 0.8rem;">@ev.Notes</div>
+                                    }
+                                </div>
+                                <span class="text-muted" style="font-size: 0.8rem;">
+                                    @ev.TransitionedAtUtc.ToLocalTime().ToString("dd.MM.yyyy HH:mm:ss")
+                                </span>
+                            </div>
+                        }
+                    </div>
+                </div>
+            </div>
+        </div>
+    }
+
+    <!-- Specimen Worklist Table -->
+    <div class="card shadow-sm border-0">
+        <div class="card-body p-0">
+            @if (_isLoading)
+            {
+                <div class="p-4 text-center text-muted small">
+                    <span class="spinner-border spinner-border-sm me-2" role="status"></span>Numune listesi yükleniyor...
+                </div>
+            }
+            else if (_specimens.Count == 0)
+            {
+                <div class="p-4 text-center text-muted small">
+                    <i class="bi bi-inbox fs-3 d-block mb-1 text-secondary"></i>
+                    Filtreye uygun numune bulunamadı.
+                </div>
+            }
+            else
+            {
+                <div class="table-responsive">
+                    <table class="table table-hover align-middle mb-0 small">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Barkod</th>
+                                <th>Numune Türü</th>
+                                <th>Tüp / Kap</th>
+                                <th>Durum</th>
+                                <th>Alınma Zamanı</th>
+                                <th>Kabul Zamanı</th>
+                                <th class="text-end">İşlemler</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var s in _specimens)
+                            {
+                                <tr>
+                                    <td class="fw-bold font-monospace text-primary">
+                                        <a href="javascript:void(0)" class="text-decoration-none" @onclick="() => SelectSpecimenByBarcodeAsync(s.Barcode)">
+                                            @s.Barcode
+                                        </a>
+                                    </td>
+                                    <td>@s.SpecimenType</td>
+                                    <td><span class="badge bg-light text-dark border">@s.ContainerType</span></td>
+                                    <td>
+                                        <span class="badge @GetStatusBadgeClass(s.Status)">@GetStatusText(s.Status)</span>
+                                    </td>
+                                    <td>@(s.CollectedAtUtc?.ToLocalTime().ToString("dd.MM.yyyy HH:mm") ?? "-")</td>
+                                    <td>@(s.ReceivedAtUtc?.ToLocalTime().ToString("dd.MM.yyyy HH:mm") ?? "-")</td>
+                                    <td class="text-end">
+                                        <button class="btn btn-outline-secondary btn-sm py-0 px-2" @onclick="() => SelectSpecimenByBarcodeAsync(s.Barcode)">
+                                            <i class="bi bi-eye me-1"></i>İncele
+                                        </button>
+                                        @if (s.Status == "Collected")
+                                        {
+                                            <button class="btn btn-outline-success btn-sm py-0 px-2 ms-1" @onclick="() => ReceiveSpecimenAsync(s.Id)">
+                                                <i class="bi bi-check2"></i> Kabul
+                                            </button>
+                                        }
+                                        else if (s.Status == "InTransit")
+                                        {
+                                            <button class="btn btn-success btn-sm py-0 px-2 ms-1" @onclick="() => ReceiveSpecimenAsync(s.Id)">
+                                                <i class="bi bi-check2"></i> Kabul
+                                            </button>
+                                        }
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </div>
+    </div>
+</div>
+
+@if (_showCollectionModal && _collectionOrder is not null)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);" role="dialog" aria-modal="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header bg-primary text-white py-2">
+                    <h5 class="modal-title fs-6">Numune Alma — @_collectionOrder.OrderNumber</h5>
+                    <button type="button" class="btn-close btn-close-white" aria-label="Kapat" @onclick="CloseCollectionModal"></button>
+                </div>
+                <div class="modal-body small">
+                    <div class="alert alert-info py-2">
+                        Barkod sunucu tarafından benzersiz ve sentetik olarak üretilecektir. Hasta kimliği istem kaydından alınır.
+                    </div>
+                    <div class="mb-2">
+                        <label for="collection-specimen-type" class="form-label fw-bold">Numune Türü</label>
+                        <input id="collection-specimen-type" class="form-control form-control-sm" @bind="_collectionSpecimenType" />
+                    </div>
+                    <div class="mb-2">
+                        <label for="collection-container-type" class="form-label fw-bold">Tüp / Kap Türü</label>
+                        <input id="collection-container-type" class="form-control form-control-sm" @bind="_collectionContainerType" />
+                    </div>
+                    <div class="mb-2">
+                        <label for="collection-location" class="form-label fw-bold">Alım Konumu</label>
+                        <input id="collection-location" class="form-control form-control-sm" @bind="_collectionLocation" />
+                    </div>
+                    <div>
+                        <label for="collection-notes" class="form-label fw-bold">Not</label>
+                        <textarea id="collection-notes" class="form-control form-control-sm" rows="2" @bind="_collectionNotes"></textarea>
+                    </div>
+                    @if (!string.IsNullOrWhiteSpace(_collectionError))
+                    {
+                        <div class="text-danger mt-2" role="alert">@_collectionError</div>
+                    }
+                </div>
+                <div class="modal-footer py-2">
+                    <button type="button" class="btn btn-secondary btn-sm" @onclick="CloseCollectionModal">Vazgeç</button>
+                    <button type="button" class="btn btn-primary btn-sm" disabled="@_isCollecting" @onclick="CollectPendingOrderSpecimenAsync">
+                        @if (_isCollecting)
+                        {
+                            <span class="spinner-border spinner-border-sm me-1" role="status"></span>
+                        }
+                        Numuneyi Kaydet
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+<!-- Reject Specimen Modal -->
+@if (_showRejectModal)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header bg-danger text-white py-2">
+                    <h5 class="modal-title fs-6">Numune Reddi — @_rejectBarcode</h5>
+                    <button type="button" class="btn-close btn-close-white" @onclick="() => _showRejectModal = false"></button>
+                </div>
+                <div class="modal-body small">
+                    <p class="text-muted mb-2">Numunenin reddedilme gerekçesini seçin veya açıklayın:</p>
+                    <select class="form-select form-select-sm mb-2" @bind="_selectedPresetReason">
+                        <option value="">Standart Red Nedeni Seçin...</option>
+                        <option value="Hemolizli numune (Analize uygun değil)">Hemolizli numune (Analize uygun değil)</option>
+                        <option value="Pıhtılı tam kan numunesi">Pıhtılı tam kan numunesi</option>
+                        <option value="Yetersiz numune hacmi">Yetersiz numune hacmi</option>
+                        <option value="Yanlış/uygunsuz tüp veya koruyucu">Yanlış/uygunsuz tüp veya koruyucu</option>
+                        <option value="Okunamayan/hasarlı barkod etiketi">Okunamayan/hasarlı barkod etiketi</option>
+                        <option value="Azami taşıma/bekleme süresi aşıldı">Azami taşıma/bekleme süresi aşıldı</option>
+                    </select>
+                    <textarea class="form-control form-control-sm"
+                              rows="3"
+                              placeholder="Ek açıklama veya özel red gerekçesi..."
+                              @bind="_customRejectReason"></textarea>
+                    @if (!string.IsNullOrWhiteSpace(_rejectError))
+                    {
+                        <div class="text-danger small mt-1">@_rejectError</div>
+                    }
+                </div>
+                <div class="modal-footer py-1">
+                    <button type="button" class="btn btn-secondary btn-sm" @onclick="() => _showRejectModal = false">Vazgeç</button>
+                    <button type="button" class="btn btn-danger btn-sm" disabled="@_isRejecting" @onclick="ConfirmRejectSpecimenAsync">
+                        @if (_isRejecting)
+                        {
+                            <span class="spinner-border spinner-border-sm me-1" role="status"></span>
+                        }
+                        Reddet ve Bildir
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private string _barcodeInput = string.Empty;
+    private string _selectedStatusFilter = string.Empty;
+    private bool _isLoading;
+    private bool _isRejecting;
+    private bool _isCollecting;
+
+    private string? _errorMessage;
+    private string? _successMessage;
+
+    private List<SpecimenSummaryResponse> _specimens = [];
+    private List<DiagnosticOrderSummaryResponse> _pendingOrders = [];
+    private SpecimenDetailResponse? _scannedSpecimen;
+
+    private bool _showCollectionModal;
+    private DiagnosticOrderDetailResponse? _collectionOrder;
+    private string _collectionSpecimenType = "Venöz Tam Kan";
+    private string _collectionContainerType = "Uygun DEMO Numune Kabı";
+    private string _collectionLocation = "DEMO Numune Alma Ünitesi";
+    private string? _collectionNotes;
+    private string? _collectionError;
+
+    // Reject Modal state
+    private bool _showRejectModal;
+    private Guid _rejectSpecimenId;
+    private string _rejectBarcode = string.Empty;
+    private string _selectedPresetReason = string.Empty;
+    private string _customRejectReason = string.Empty;
+    private string? _rejectError;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadWorklistAsync();
+    }
+
+    private async Task LoadWorklistAsync()
+    {
+        _isLoading = true;
+        _errorMessage = null;
+        try
+        {
+            _specimens = await DiagnosticsApi.GetSpecimenWorklistAsync(
+                status: string.IsNullOrWhiteSpace(_selectedStatusFilter) ? null : _selectedStatusFilter,
+                maxResults: 50);
+            _pendingOrders = await DiagnosticsApi.GetDiagnosticOrderWorklistAsync(
+                orderType: "Laboratory",
+                status: "Placed",
+                maxResults: 50);
+        }
+        catch (Exception)
+        {
+            _errorMessage = "Numune iş listesi yüklenemedi. Lütfen yeniden deneyin.";
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+    }
+
+    private async Task OpenCollectionModalAsync(Guid orderId)
+    {
+        _collectionError = null;
+        _collectionOrder = await DiagnosticsApi.GetDiagnosticOrderByIdAsync(orderId);
+        if (_collectionOrder is null)
+        {
+            _errorMessage = "Numune alınacak laboratuvar istemi yüklenemedi.";
+            return;
+        }
+
+        var instructions = _collectionOrder.Items.FirstOrDefault()?.SpecialInstructions;
+        (_collectionSpecimenType, _collectionContainerType) = ParseSpecimenInstructions(instructions);
+        _collectionLocation = "DEMO Numune Alma Ünitesi";
+        _collectionNotes = null;
+        _showCollectionModal = true;
+    }
+
+    private async Task CollectPendingOrderSpecimenAsync()
+    {
+        if (_collectionOrder is null)
+        {
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(_collectionSpecimenType) || string.IsNullOrWhiteSpace(_collectionContainerType))
+        {
+            _collectionError = "Numune ve tüp/kap türü zorunludur.";
+            return;
+        }
+
+        _isCollecting = true;
+        _collectionError = null;
+        try
+        {
+            var specimen = await DiagnosticsApi.CollectSpecimenAsync(new CollectSpecimenRequest
+            {
+                DiagnosticOrderId = _collectionOrder.Id,
+                PatientId = _collectionOrder.PatientId,
+                SpecimenType = _collectionSpecimenType.Trim(),
+                ContainerType = _collectionContainerType.Trim(),
+                CollectionLocation = _collectionLocation,
+                CollectionNotes = _collectionNotes,
+            });
+
+            if (specimen is null)
+            {
+                _collectionError = "Numune kaydedilemedi. İstem durumu ve yetkinizi kontrol edin.";
+                return;
+            }
+
+            _showCollectionModal = false;
+            _scannedSpecimen = specimen;
+            _successMessage = $"Numune alındı; sentetik barkod {specimen.Barcode} üretildi.";
+            await LoadWorklistAsync();
+        }
+        catch (Exception)
+        {
+            _collectionError = "Numune kaydedilemedi. Bilgileri kontrol edip yeniden deneyin.";
+        }
+        finally
+        {
+            _isCollecting = false;
+        }
+    }
+
+    private void CloseCollectionModal()
+    {
+        _showCollectionModal = false;
+        _collectionOrder = null;
+        _collectionError = null;
+    }
+
+    private static (string SpecimenType, string ContainerType) ParseSpecimenInstructions(string? instructions)
+    {
+        if (string.IsNullOrWhiteSpace(instructions))
+        {
+            return ("Venöz Tam Kan", "Uygun DEMO Numune Kabı");
+        }
+
+        var openParenthesis = instructions.LastIndexOf('(');
+        if (openParenthesis <= 0 || !instructions.EndsWith(')'))
+        {
+            return (instructions.Trim(), "Uygun DEMO Numune Kabı");
+        }
+
+        return (
+            instructions[..openParenthesis].Trim(),
+            instructions[(openParenthesis + 1)..^1].Trim());
+    }
+
+    private async Task OnBarcodeKeyUp(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter")
+        {
+            await ScanBarcodeAsync();
+        }
+    }
+
+    private async Task ScanBarcodeAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_barcodeInput))
+        {
+            return;
+        }
+
+        await SelectSpecimenByBarcodeAsync(_barcodeInput.Trim());
+    }
+
+    private async Task SelectSpecimenByBarcodeAsync(string barcode)
+    {
+        _errorMessage = null;
+        try
+        {
+            var specimen = await DiagnosticsApi.GetSpecimenByBarcodeAsync(barcode);
+            if (specimen is null)
+            {
+                _errorMessage = $"'{barcode}' barkoduna ait numune kaydı bulunamadı.";
+                _scannedSpecimen = null;
+            }
+            else
+            {
+                _scannedSpecimen = specimen;
+            }
+        }
+        catch (Exception)
+        {
+            _errorMessage = "Barkod sorgulanamadı. Barkodu kontrol edip yeniden deneyin.";
+        }
+    }
+
+    private async Task TransitSpecimenAsync(Guid specimenId)
+    {
+        _errorMessage = null;
+        try
+        {
+            var res = await DiagnosticsApi.TransitSpecimenAsync(specimenId, new TransitSpecimenRequest
+            {
+                Location = "Pnömatik Taşıma / Kurye",
+                Notes = "Numune kuryeye teslim edildi.",
+            });
+
+            if (res is not null)
+            {
+                _successMessage = $"Numune ({res.Barcode}) taşımaya verildi.";
+                _scannedSpecimen = res;
+                await LoadWorklistAsync();
+            }
+        }
+        catch (Exception)
+        {
+            _errorMessage = "Numune transferi tamamlanamadı. Lütfen yeniden deneyin.";
+        }
+    }
+
+    private async Task ReceiveSpecimenAsync(Guid specimenId)
+    {
+        _errorMessage = null;
+        try
+        {
+            var res = await DiagnosticsApi.ReceiveSpecimenAsync(specimenId, new ReceiveSpecimenRequest
+            {
+                Location = "Merkez Laboratuvar Numune Kabul",
+                Notes = "Numune laboratuvarda kabul edildi.",
+            });
+
+            if (res is not null)
+            {
+                _successMessage = $"Numune ({res.Barcode}) laboratuvara kabul edildi.";
+                _scannedSpecimen = res;
+                await LoadWorklistAsync();
+            }
+        }
+        catch (Exception)
+        {
+            _errorMessage = "Numune kabulü tamamlanamadı. Lütfen yeniden deneyin.";
+        }
+    }
+
+    private void OpenRejectModal(Guid specimenId, string barcode)
+    {
+        _rejectSpecimenId = specimenId;
+        _rejectBarcode = barcode;
+        _selectedPresetReason = string.Empty;
+        _customRejectReason = string.Empty;
+        _rejectError = null;
+        _showRejectModal = true;
+    }
+
+    private async Task ConfirmRejectSpecimenAsync()
+    {
+        var reason = !string.IsNullOrWhiteSpace(_selectedPresetReason)
+            ? _selectedPresetReason
+            : _customRejectReason;
+
+        if (string.IsNullOrWhiteSpace(reason))
+        {
+            _rejectError = "Lütfen bir red gerekçesi belirtin.";
+            return;
+        }
+
+        _isRejecting = true;
+        _rejectError = null;
+
+        try
+        {
+            var res = await DiagnosticsApi.RejectSpecimenAsync(_rejectSpecimenId, new RejectSpecimenRequest
+            {
+                RejectionReason = reason.Trim(),
+                Location = "Laboratuvar Numune Kabul",
+                Notes = _customRejectReason,
+            });
+
+            if (res is not null)
+            {
+                _showRejectModal = false;
+                _successMessage = $"Numune ({_rejectBarcode}) reddedildi.";
+                _scannedSpecimen = res;
+                await LoadWorklistAsync();
+            }
+        }
+        catch (Exception)
+        {
+            _rejectError = "Numune reddi kaydedilemedi. Bilgileri kontrol edip yeniden deneyin.";
+        }
+        finally
+        {
+            _isRejecting = false;
+        }
+    }
+
+    private static string GetStatusText(string status) => status switch
+    {
+        "Collected" => "Toplandı",
+        "InTransit" => "Taşımada",
+        "Received" => "Kabul Edildi",
+        "Rejected" => "Reddedildi",
+        "Processing" => "Çalışmada",
+        "Completed" => "Tamamlandı",
+        "Disposed" => "İmha Edildi",
+        _ => status,
+    };
+
+    private static string GetStatusBadgeClass(string status) => status switch
+    {
+        "Collected" => "bg-primary",
+        "InTransit" => "bg-warning text-dark",
+        "Received" => "bg-info text-dark",
+        "Rejected" => "bg-danger",
+        "Processing" => "bg-secondary",
+        "Completed" => "bg-success",
+        "Disposed" => "bg-dark",
+        _ => "bg-secondary",
+    };
+}

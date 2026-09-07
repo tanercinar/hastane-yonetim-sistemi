@@ -1,0 +1,497 @@
+@page "/specialty/home-health"
+@using HospitalManagement.Contracts.Specialty
+@using HospitalManagement.Web.Client.Specialty
+@using Microsoft.AspNetCore.Authorization
+@attribute [Authorize]
+@inject ISpecialtyCareApiClient SpecialtyClient
+
+<PageTitle>Evde Sağlık Planlama ve Ziyaret Yönetimi — Hastane Yönetim Sistemi</PageTitle>
+
+<div class="container-fluid px-4 py-3">
+    <!-- Address Privacy & Minimum Data Banner -->
+    <div class="alert alert-info border-info d-flex align-items-center mb-4" role="alert">
+        <i class="bi bi-shield-lock-fill fs-4 me-3 text-info"></i>
+        <div>
+            <strong>Adres Gizliliği ve Minimum Konum Bildirimi:</strong> Hasta adres ve iletişim bilgileri yalnızca görevlendirilmiş evde sağlık personeli tarafından görüntülenir. Sistemde harita veya gerçek zamanlı coğrafi izleme entegrasyonu bulunmamaktadır.
+        </div>
+    </div>
+
+    <!-- Header & Action Bar -->
+    <div class="d-flex justify-content-between align-items-center mb-4 pb-2 border-bottom">
+        <div>
+            <h2 class="h3 fw-bold text-primary mb-1">Evde Sağlık Planlama ve Ziyaret Yönetimi</h2>
+            <p class="text-muted small mb-0">Hasta ev ziyareti talepleri, personel görevlendirmesi, pansuman/numune/ilaç takibi ve ziyaret tamamlama.</p>
+        </div>
+        <button class="btn btn-primary d-flex align-items-center gap-2" @onclick="OpenRequestModal">
+            <i class="bi bi-plus-circle"></i>
+            <span>Yeni Ziyaret Talebi</span>
+        </button>
+    </div>
+
+    <!-- Filter & Search Bar -->
+    <div class="card shadow-sm mb-4 border-0">
+        <div class="card-body">
+            <div class="row g-3 align-items-center">
+                <div class="col-md-4">
+                    <div class="btn-group w-100" role="group">
+                        <button type="button" class="btn @(_statusFilter == "All" ? "btn-primary" : "btn-outline-primary")" @onclick='() => SetFilter("All")'>
+                            Tümü (@_visits.Count)
+                        </button>
+                        <button type="button" class="btn @(_statusFilter == "Requested" ? "btn-warning" : "btn-outline-warning")" @onclick='() => SetFilter("Requested")'>
+                            Talep (@_visits.Count(v => v.Status == "Requested"))
+                        </button>
+                        <button type="button" class="btn @(_statusFilter == "Assigned" ? "btn-info" : "btn-outline-info")" @onclick='() => SetFilter("Assigned")'>
+                            Atandı (@_visits.Count(v => v.Status == "Assigned" || v.Status == "InProgress"))
+                        </button>
+                    </div>
+                </div>
+                <div class="col-md-8 text-end">
+                    <button class="btn btn-outline-secondary btn-sm" @onclick="LoadVisitsAsync">
+                        <i class="bi bi-arrow-clockwise me-1"></i>Yenile
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    @if (_isLoading)
+    {
+        <div class="text-center py-5">
+            <div class="spinner-border text-primary" role="status">
+                <span class="visually-hidden">Yükleniyor...</span>
+            </div>
+            <p class="text-muted mt-2">Evde sağlık ziyaretleri yükleniyor...</p>
+        </div>
+    }
+    else if (_errorMessage is not null)
+    {
+        <div class="alert alert-danger" role="alert">
+            <i class="bi bi-x-circle me-2"></i>@_errorMessage
+        </div>
+    }
+    else if (FilteredVisits.Count == 0)
+    {
+        <div class="card shadow-sm border-0 text-center py-5">
+            <div class="card-body">
+                <i class="bi bi-house-heart display-4 text-muted mb-3 d-block"></i>
+                <h5 class="text-muted">Kayıtlı evde sağlık ziyareti bulunmuyor.</h5>
+                <p class="text-muted small">Yeni bir ziyaret talebi oluşturmak için yukarıdaki butonu kullanabilirsiniz.</p>
+            </div>
+        </div>
+    }
+    else
+    {
+        <!-- Visits Table -->
+        <div class="card shadow-sm border-0">
+            <div class="table-responsive">
+                <table class="table table-hover align-middle mb-0">
+                    <thead class="table-light">
+                        <tr>
+                            <th>Protokol</th>
+                            <th>Hizmet Türü</th>
+                            <th>Öncelik</th>
+                            <th>Durum</th>
+                            <th>Konum (İl / İlçe)</th>
+                            <th>Planlanan Tarih</th>
+                            <th>Görevli Personel</th>
+                            <th>İşlemler</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var visit in FilteredVisits)
+                        {
+                            <tr>
+                                <td class="fw-bold">@visit.ProtocolNumber</td>
+                                <td>
+                                    <span class="fw-semibold">@GetServiceTypeLabel(visit.ServiceType)</span>
+                                </td>
+                                <td>
+                                    @if (visit.Priority == "Urgent")
+                                    {
+                                        <span class="badge bg-danger">Acil</span>
+                                    }
+                                    else if (visit.Priority == "Palliative")
+                                    {
+                                        <span class="badge bg-purple text-white" style="background-color: #6f42c1;">Palyatif</span>
+                                    }
+                                    else
+                                    {
+                                        <span class="badge bg-secondary">Rutin</span>
+                                    }
+                                </td>
+                                <td>
+                                    @if (visit.Status == "Requested")
+                                    {
+                                        <span class="badge bg-warning text-dark">Talep Edildi</span>
+                                    }
+                                    else if (visit.Status == "Assigned")
+                                    {
+                                        <span class="badge bg-info text-dark">Ekip Atandı</span>
+                                    }
+                                    else if (visit.Status == "InProgress")
+                                    {
+                                        <span class="badge bg-primary">Yolda / Ziyarette</span>
+                                    }
+                                    else if (visit.Status == "Completed")
+                                    {
+                                        <span class="badge bg-success">Tamamlandı</span>
+                                    }
+                                    else
+                                    {
+                                        <span class="badge bg-danger">İptal</span>
+                                    }
+                                </td>
+                                <td>
+                                    <i class="bi bi-geo-alt me-1 text-muted"></i>@visit.City / @visit.District
+                                </td>
+                                <td class="small text-muted">
+                                    @(visit.ScheduledDateUtc.HasValue ? visit.ScheduledDateUtc.Value.ToLocalTime().ToString("dd.MM.yyyy HH:mm") : "-")
+                                </td>
+                                <td class="small">
+                                    @(visit.AssignedStaffId.HasValue ? visit.AssignedStaffId.Value.ToString()[..8] + "..." : "<Atanmadı>")
+                                </td>
+                                <td>
+                                    <div class="btn-group btn-group-sm">
+                                        @if (visit.Status == "Requested")
+                                        {
+                                            <button class="btn btn-outline-primary" @onclick="() => OpenAssignModal(visit)">
+                                                <i class="bi bi-person-check me-1"></i>Ata
+                                            </button>
+                                        }
+                                        else if (visit.Status == "Assigned")
+                                        {
+                                            <button class="btn btn-outline-info" @onclick="() => StartVisitAsync(visit.Id)">
+                                                <i class="bi bi-play-circle me-1"></i>Başlat
+                                            </button>
+                                            <button class="btn btn-outline-success" @onclick="() => OpenCompleteModal(visit)">
+                                                <i class="bi bi-check2-circle me-1"></i>Tamamla
+                                            </button>
+                                        }
+                                        else if (visit.Status == "InProgress")
+                                        {
+                                            <button class="btn btn-outline-success" @onclick="() => OpenCompleteModal(visit)">
+                                                <i class="bi bi-check2-circle me-1"></i>Tamamla
+                                            </button>
+                                        }
+
+                                        @if (visit.Status != "Completed" && visit.Status != "Cancelled")
+                                        {
+                                            <button class="btn btn-outline-danger" @onclick="() => CancelVisitAsync(visit.Id)">
+                                                <i class="bi bi-x-circle"></i>
+                                            </button>
+                                        }
+                                    </div>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    }
+</div>
+
+<!-- Modal: Request Visit -->
+@if (_showRequestModal)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title fw-bold">Yeni Evde Sağlık Ziyaret Talebi</h5>
+                    <button type="button" class="btn-close" @onclick="() => _showRequestModal = false"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <label class="form-label small fw-semibold">Hasta ID *</label>
+                            <input type="text" class="form-control" @bind="_requestReq.PatientId" />
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label small fw-semibold">Hizmet Türü *</label>
+                            <select class="form-select" @bind="_requestReq.ServiceType">
+                                <option value="GeneralNursing">Genel Hemşirelik Muayene / Bakım</option>
+                                <option value="WoundDressing">Yara Bakımı ve Pansuman</option>
+                                <option value="BloodCollection">Evde Kan / Numune Alma</option>
+                                <option value="MedicationAdministration">İlaç Uygulama / Serum</option>
+                                <option value="PhysicalTherapyAssistance">Fizik Tedavi ve Egzersiz Desteği</option>
+                                <option value="PalliativeCare">Palyatif Bakım</option>
+                                <option value="CatheterCare">Sonda / Kateter Değişimi</option>
+                            </select>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label small fw-semibold">Öncelik *</label>
+                            <select class="form-select" @bind="_requestReq.Priority">
+                                <option value="Routine">Rutin</option>
+                                <option value="Urgent">Acil</option>
+                                <option value="Palliative">Palyatif</option>
+                            </select>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label small fw-semibold">İletişim Telefonu *</label>
+                            <input type="text" class="form-control" placeholder="0532 000 00 00" @bind="_requestReq.ContactPhone" />
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label small fw-semibold">İl *</label>
+                            <input type="text" class="form-control" placeholder="İstanbul, Ankara..." @bind="_requestReq.City" />
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label small fw-semibold">İlçe *</label>
+                            <input type="text" class="form-control" placeholder="Kadıköy, Çankaya..." @bind="_requestReq.District" />
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label small fw-semibold">Adres Detayı (Yalnızca görevli personel görür) *</label>
+                            <textarea class="form-control" rows="2" placeholder="Mahalle, Cadde, Sokak, No, Daire..." @bind="_requestReq.AddressDetail"></textarea>
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label small fw-semibold">Klinik Not / Talep Açıklaması</label>
+                            <textarea class="form-control" rows="2" placeholder="Hastanın durumu, ihtiyaç duyulan malzemeler..." @bind="_requestReq.InitialNotes"></textarea>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" @onclick="() => _showRequestModal = false">İptal</button>
+                    <button type="button" class="btn btn-primary" @onclick="SubmitRequestAsync">Talebi Oluştur</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+<!-- Modal: Assign Team -->
+@if (_showAssignModal)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title fw-bold">Ekip / Personel Görevlendir</h5>
+                    <button type="button" class="btn-close" @onclick="() => _showAssignModal = false"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label small fw-semibold">Görevlendirilen Personel ID *</label>
+                        <input type="text" class="form-control" @bind="_assignReq.AssignedStaffId" />
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label small fw-semibold">Planlanan Ziyaret Tarihi / Saati *</label>
+                        <input type="datetime-local" class="form-control" @bind="_assignReq.ScheduledDateUtc" />
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" @onclick="() => _showAssignModal = false">İptal</button>
+                    <button type="button" class="btn btn-primary" @onclick="SubmitAssignAsync">Görevlendir</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+<!-- Modal: Complete Visit -->
+@if (_showCompleteModal)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title fw-bold">Ziyareti Tamamla</h5>
+                    <button type="button" class="btn-close" @onclick="() => _showCompleteModal = false"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label small fw-semibold">Ziyaret Sonuç Klinik Notu *</label>
+                        <textarea class="form-control" rows="3" placeholder="Uygulanan tedavi, hastanın genel durumu..." @bind="_completeReq.ClinicalNotes"></textarea>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label small fw-semibold">Vital Bulgular Özeti</label>
+                        <input type="text" class="form-control" placeholder="TA: 120/80 mmHg, Nabız: 74 bpm, Şeker: 110 mg/dL..." @bind="_completeReq.VitalsSummaryNotes" />
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label small fw-semibold">Evde Sağlık Encounter ID *</label>
+                        <input type="text" class="form-control" @bind="_completeReq.EncounterId" />
+                        <div class="form-text">Aynı hastaya ait, HomeHealth türünde ve başlatılmış ya da tamamlanmış klinik karşılaşma zorunludur.</div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" @onclick="() => _showCompleteModal = false">İptal</button>
+                    <button type="button" class="btn btn-success" @onclick="SubmitCompleteAsync">Tamamlandı Olarak Kaydet</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private bool _isLoading = false;
+    private string? _errorMessage;
+    private string _statusFilter = "All";
+    private List<HomeHealthVisitResponse> _visits = [];
+
+    private bool _showRequestModal = false;
+    private RequestHomeHealthVisitRequest _requestReq = new();
+
+    private bool _showAssignModal = false;
+    private Guid _targetVisitId;
+    private AssignHomeHealthTeamRequest _assignReq = new();
+
+    private bool _showCompleteModal = false;
+    private CompleteHomeHealthVisitRequest _completeReq = new();
+
+    private List<HomeHealthVisitResponse> FilteredVisits => _statusFilter switch
+    {
+        "Requested" => _visits.Where(v => v.Status == "Requested").ToList(),
+        "Assigned" => _visits.Where(v => v.Status == "Assigned" || v.Status == "InProgress").ToList(),
+        _ => _visits,
+    };
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadVisitsAsync();
+    }
+
+    private void SetFilter(string filter)
+    {
+        _statusFilter = filter;
+    }
+
+    private async Task LoadVisitsAsync()
+    {
+        _isLoading = true;
+        _errorMessage = null;
+
+        try
+        {
+            _visits = await SpecialtyClient.GetActiveHomeHealthVisitsAsync();
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"Evde sağlık ziyaretleri yüklenirken hata: {ex.Message}";
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+    }
+
+    private void OpenRequestModal()
+    {
+        _requestReq = new RequestHomeHealthVisitRequest
+        {
+            PatientId = Guid.Parse("00000000-0000-0000-0000-000000000201"),
+            ServiceType = "GeneralNursing",
+            Priority = "Routine",
+            City = "DEMO İstanbul",
+            District = "DEMO Kadıköy",
+            AddressDetail = "DEMO adres — gerçek değildir",
+            ContactPhone = "DEMO-000-000-0000",
+            InitialNotes = "Hipertansiyon ve kan şekeri rutin takibi",
+        };
+        _showRequestModal = true;
+    }
+
+    private async Task SubmitRequestAsync()
+    {
+        try
+        {
+            await SpecialtyClient.RequestHomeHealthVisitAsync(_requestReq);
+            _showRequestModal = false;
+            await LoadVisitsAsync();
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"Ziyaret talebi oluşturulurken hata: {ex.Message}";
+        }
+    }
+
+    private void OpenAssignModal(HomeHealthVisitResponse visit)
+    {
+        _targetVisitId = visit.Id;
+        _assignReq = new AssignHomeHealthTeamRequest
+        {
+            AssignedStaffId = Guid.Parse("00000000-0000-0000-0000-000000000103"),
+            ScheduledDateUtc = DateTime.UtcNow.AddHours(4),
+        };
+        _showAssignModal = true;
+    }
+
+    private async Task SubmitAssignAsync()
+    {
+        try
+        {
+            await SpecialtyClient.AssignHomeHealthTeamAsync(_targetVisitId, _assignReq);
+            _showAssignModal = false;
+            await LoadVisitsAsync();
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"Görevlendirme kaydedilirken hata: {ex.Message}";
+        }
+    }
+
+    private async Task StartVisitAsync(Guid visitId)
+    {
+        try
+        {
+            await SpecialtyClient.StartHomeHealthVisitAsync(visitId);
+            await LoadVisitsAsync();
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"Ziyaret başlatılırken hata: {ex.Message}";
+        }
+    }
+
+    private void OpenCompleteModal(HomeHealthVisitResponse visit)
+    {
+        _targetVisitId = visit.Id;
+        _completeReq = new CompleteHomeHealthVisitRequest
+        {
+            ClinicalNotes = "Pansuman yapıldı, vital bulgular stabil.",
+            VitalsSummaryNotes = "TA: 120/80 mmHg, Nabız: 72 bpm",
+            EncounterId = Guid.Empty,
+        };
+        _showCompleteModal = true;
+    }
+
+    private async Task SubmitCompleteAsync()
+    {
+        try
+        {
+            await SpecialtyClient.CompleteHomeHealthVisitAsync(_targetVisitId, _completeReq);
+            _showCompleteModal = false;
+            await LoadVisitsAsync();
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"Ziyaret tamamlanırken hata: {ex.Message}";
+        }
+    }
+
+    private async Task CancelVisitAsync(Guid visitId)
+    {
+        try
+        {
+            await SpecialtyClient.CancelHomeHealthVisitAsync(visitId, new CancelHomeHealthVisitRequest
+            {
+                Reason = "Hasta talebi üzerine iptal edildi",
+            });
+            await LoadVisitsAsync();
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"Ziyaret iptal edilirken hata: {ex.Message}";
+        }
+    }
+
+    private static string GetServiceTypeLabel(string serviceType) => serviceType switch
+    {
+        "GeneralNursing" => "Genel Hemşirelik Muayene / Bakım",
+        "WoundDressing" => "Yara Bakımı ve Pansuman",
+        "BloodCollection" => "Evde Kan / Numune Alma",
+        "MedicationAdministration" => "İlaç Uygulama / Serum",
+        "PhysicalTherapyAssistance" => "Fizik Tedavi / Egzersiz",
+        "PalliativeCare" => "Palyatif Bakım",
+        "CatheterCare" => "Sonda / Kateter Değişimi",
+        _ => serviceType,
+    };
+}

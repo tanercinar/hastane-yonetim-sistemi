@@ -1,0 +1,89 @@
+@page "/account/two-factor"
+@inject IdentityApiClient Identity
+@inject NavigationManager Navigation
+
+<PageTitle>İki adımlı doğrulama</PageTitle>
+
+<section class="account-shell" aria-labelledby="two-factor-heading">
+    <header class="account-shell__heading">
+        <span class="page-eyebrow">Güvenli oturum</span>
+        <h1 id="two-factor-heading">İki adımlı doğrulama</h1>
+        <p>Kimlik doğrulama uygulamanızdaki kodu veya tek kullanımlık kurtarma kodlarından birini girin.</p>
+    </header>
+
+    <EditForm Model="_model" OnValidSubmit="SubmitAsync" class="account-form">
+        <DataAnnotationsValidator />
+        <ValidationSummary />
+        <label for="two-factor-code">Doğrulama kodu</label>
+        <InputText id="two-factor-code"
+                   @bind-Value="_model.Code"
+                   autocomplete="one-time-code" />
+        <label class="account-checkbox" for="two-factor-recovery">
+            <InputCheckbox id="two-factor-recovery" @bind-Value="_model.IsRecoveryCode" />
+            Kurtarma kodu kullanıyorum
+        </label>
+        <button class="ui-button ui-button--primary" type="submit" disabled="@_isSubmitting">
+            @(_isSubmitting ? "Doğrulanıyor…" : "Doğrula")
+        </button>
+    </EditForm>
+
+    @if (_message is not null)
+    {
+        <p class="account-message account-message--error" role="alert">@_message</p>
+    }
+
+    <nav class="account-links" aria-label="Hesap işlemleri">
+        <a href="account/login">Giriş ekranına dön</a>
+    </nav>
+</section>
+
+@code {
+    private readonly TwoFactorModel _model = new();
+    private bool _isSubmitting;
+    private string? _message;
+
+    private async Task SubmitAsync()
+    {
+        _isSubmitting = true;
+        _message = null;
+
+        try
+        {
+            var result = await Identity.TwoFactorLoginAsync(new TwoFactorLoginRequest
+            {
+                Code = _model.Code,
+                IsRecoveryCode = _model.IsRecoveryCode,
+            });
+
+            if (result.Succeeded)
+            {
+                Navigation.NavigateTo("account");
+                return;
+            }
+
+            _message = result.Message;
+        }
+        catch (OperationCanceledException)
+        {
+            _message = "Doğrulama isteği zaman aşımına uğradı. Lütfen tekrar deneyin.";
+        }
+        catch (Exception)
+        {
+            _message = "Sunucuya güvenli bağlantı kurulamadı. Yerel altyapının ve HTTPS adresinin çalıştığını kontrol edin.";
+        }
+        finally
+        {
+            _model.Code = string.Empty;
+            _isSubmitting = false;
+        }
+    }
+
+    private sealed class TwoFactorModel
+    {
+        [Required(ErrorMessage = "Doğrulama kodu zorunludur.")]
+        [StringLength(32, MinimumLength = 6, ErrorMessage = "Kod 6 ile 32 karakter arasında olmalıdır.")]
+        public string Code { get; set; } = string.Empty;
+
+        public bool IsRecoveryCode { get; set; }
+    }
+}

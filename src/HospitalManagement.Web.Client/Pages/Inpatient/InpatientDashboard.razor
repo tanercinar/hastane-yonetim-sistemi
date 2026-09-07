@@ -1,0 +1,319 @@
+@page "/inpatient/dashboard"
+@using HospitalManagement.Contracts.Inpatient
+@using HospitalManagement.Web.Client.Inpatient
+@using Microsoft.AspNetCore.SignalR.Client
+@implements IAsyncDisposable
+@inject IInpatientApiClient InpatientApi
+@inject NavigationManager Navigation
+
+<div class="container-fluid py-3">
+    <!-- Üst Başlık ve Canlı Bağlantı Durumu -->
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <div>
+            <h2 class="fw-bold mb-0">Servis &amp; Yatak Doluluk Dashboard'u</h2>
+            <p class="text-muted mb-0">Hastane genelindeki yatak doluluğu, bekleyen kabul/transfer ve taburculukların gerçek zamanlı (SignalR) izleme paneli.</p>
+        </div>
+        <div class="d-flex align-items-center gap-3">
+            @if (_isHubConnected)
+            {
+                <span class="badge bg-success-subtle text-success border border-success px-3 py-2">
+                    <i class="bi bi-broadcast me-1"></i> Canlı Bağlantı Aktif
+                </span>
+            }
+            else
+            {
+                <span class="badge bg-secondary-subtle text-secondary border px-3 py-2">
+                    <i class="bi bi-wifi-off me-1"></i> Gerçek Zamanlı Bağlantı Bekleniyor
+                </span>
+            }
+            <button class="btn btn-outline-primary" @onclick="LoadDashboardAsync">
+                <i class="bi bi-arrow-clockwise me-1"></i> Yenile
+            </button>
+        </div>
+    </div>
+
+    @if (!string.IsNullOrWhiteSpace(_errorMessage))
+    {
+        <div class="alert alert-danger alert-dismissible fade show" role="alert">
+            <i class="bi bi-exclamation-triangle-fill me-2"></i>@_errorMessage
+            <button type="button" class="btn-close" @onclick="() => _errorMessage = null"></button>
+        </div>
+    }
+
+    @if (_isLoading)
+    {
+        <div class="text-center py-5">
+            <div class="spinner-border text-primary" role="status">
+                <span class="visually-hidden">Yükleniyor...</span>
+            </div>
+            <p class="text-muted mt-2">Doluluk verileri hesaplanıyor...</p>
+        </div>
+    }
+    else if (_dashboard != null)
+    {
+        <!-- KPI Özet Kartları -->
+        <div class="row g-3 mb-4">
+            <!-- Genel Doluluk Oranı -->
+            <div class="col-md-3">
+                <div class="card shadow-sm border-0 h-100">
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between align-items-center mb-2">
+                            <span class="text-muted fw-semibold">Genel Doluluk Oranı</span>
+                            <i class="bi bi-pie-chart text-primary fs-4"></i>
+                        </div>
+                        <h3 class="fw-bold mb-1 text-primary">%@_dashboard.OverallOccupancyPercentage.ToString("F1")</h3>
+                        <div class="progress mt-2" style="height: 8px;">
+                            <div class="progress-bar @GetProgressBarClass(_dashboard.OverallOccupancyPercentage)"
+                                 role="progressbar"
+                                 style="width: @Math.Min(100, _dashboard.OverallOccupancyPercentage)%"></div>
+                        </div>
+                        <small class="text-muted mt-1 d-block">@_dashboard.OccupiedBeds / @_dashboard.TotalBeds Yatak Dolu</small>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Yatak Durumları -->
+            <div class="col-md-3">
+                <div class="card shadow-sm border-0 h-100">
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between align-items-center mb-2">
+                            <span class="text-muted fw-semibold">Yatak Kapasitesi</span>
+                            <i class="bi bi-hospital text-info fs-4"></i>
+                        </div>
+                        <h3 class="fw-bold mb-2">@_dashboard.TotalBeds <small class="text-muted fs-6">Toplam</small></h3>
+                        <div class="d-flex flex-wrap gap-1">
+                            <span class="badge bg-success">@_dashboard.AvailableBeds Müsait</span>
+                            <span class="badge bg-primary">@_dashboard.OccupiedBeds Dolu</span>
+                            <span class="badge bg-warning text-dark">@_dashboard.CleaningBeds Temizlikte</span>
+                            <span class="badge bg-danger">@_dashboard.MaintenanceBeds Bakımda</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Bekleyen Kabul & Transfer İstekleri -->
+            <div class="col-md-3">
+                <div class="card shadow-sm border-0 h-100">
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between align-items-center mb-2">
+                            <span class="text-muted fw-semibold">Bekleyen Hareketler</span>
+                            <i class="bi bi-arrow-left-right text-warning fs-4"></i>
+                        </div>
+                        <div class="d-flex justify-content-between align-items-center mb-2">
+                            <span>Bekleyen Kabul:</span>
+                            <span class="badge bg-warning text-dark fs-6">@_dashboard.PendingAdmissionsCount</span>
+                        </div>
+                        <div class="d-flex justify-content-between align-items-center">
+                            <span>Bekleyen Transfer:</span>
+                            <span class="badge bg-info text-dark fs-6">@_dashboard.PendingTransfersCount</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Bugün Taburcu Edilenler -->
+            <div class="col-md-3">
+                <div class="card shadow-sm border-0 h-100">
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between align-items-center mb-2">
+                            <span class="text-muted fw-semibold">Bugün Taburcu</span>
+                            <i class="bi bi-box-arrow-right text-success fs-4"></i>
+                        </div>
+                        <h3 class="fw-bold mb-1 text-success">@_dashboard.TodayDischargesCount</h3>
+                        <small class="text-muted">Bugün başarıyla tamamlanan taburculuk / sevk sayısı</small>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Servis Bazlı Doluluk Tablosu -->
+        <div class="card shadow-sm border-0 mb-4">
+            <div class="card-header bg-white py-3 border-0">
+                <div class="d-flex justify-content-between align-items-center">
+                    <h5 class="fw-bold mb-0"><i class="bi bi-layout-text-window me-2"></i>Klinik Servisler Doluluk Tablosu</h5>
+                    <span class="badge bg-light text-dark border">@_dashboard.Wards.Count Servis Aktif</span>
+                </div>
+            </div>
+            <div class="table-responsive">
+                <table class="table table-hover align-middle mb-0">
+                    <thead class="table-light">
+                        <tr>
+                            <th>Servis Adı</th>
+                            <th>Servis Kodu</th>
+                            <th>Toplam Yatak</th>
+                            <th>Dolu</th>
+                            <th>Müsait</th>
+                            <th>Temizlikte</th>
+                            <th>Bakımda</th>
+                            <th>Aktif Hasta</th>
+                            <th style="min-width: 180px;">Doluluk Oranı</th>
+                            <th class="text-end">Hızlı Erişim</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var ward in _dashboard.Wards)
+                        {
+                            <tr>
+                                <td class="fw-bold">@ward.WardName</td>
+                                <td><code>@ward.WardCode</code></td>
+                                <td>@ward.TotalBeds</td>
+                                <td><span class="badge bg-primary">@ward.OccupiedBeds</span></td>
+                                <td><span class="badge bg-success">@ward.AvailableBeds</span></td>
+                                <td>
+                                    @if (ward.CleaningBeds > 0)
+                                    {
+                                        <span class="badge bg-warning text-dark">@ward.CleaningBeds</span>
+                                    }
+                                    else
+                                    {
+                                        <span class="text-muted">0</span>
+                                    }
+                                </td>
+                                <td>
+                                    @if (ward.MaintenanceBeds > 0)
+                                    {
+                                        <span class="badge bg-danger">@ward.MaintenanceBeds</span>
+                                    }
+                                    else
+                                    {
+                                        <span class="text-muted">0</span>
+                                    }
+                                </td>
+                                <td class="fw-semibold">@ward.ActivePatientsCount</td>
+                                <td>
+                                    <div class="d-flex align-items-center gap-2">
+                                        <div class="progress flex-grow-1" style="height: 6px;">
+                                            <div class="progress-bar @GetProgressBarClass(ward.OccupancyPercentage)"
+                                                 role="progressbar"
+                                                 style="width: @Math.Min(100, ward.OccupancyPercentage)%"></div>
+                                        </div>
+                                        <small class="fw-bold">%@ward.OccupancyPercentage.ToString("F1")</small>
+                                    </div>
+                                </td>
+                                <td class="text-end">
+                                    <a href="inpatient/board" class="btn btn-outline-primary btn-sm me-1">
+                                        <i class="bi bi-card-checklist me-1"></i> Pano
+                                    </a>
+                                    <a href="inpatient/beds" class="btn btn-outline-secondary btn-sm">
+                                        <i class="bi bi-hospital me-1"></i> Yataklar
+                                    </a>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    private bool _isLoading = true;
+    private string? _errorMessage;
+    private InpatientDashboardResponse? _dashboard;
+    private HubConnection? _hubConnection;
+    private bool _isHubConnected;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadDashboardAsync();
+        _ = StartRealtimeConnectionAsync();
+    }
+
+    private async Task LoadDashboardAsync()
+    {
+        _isLoading = true;
+        _errorMessage = null;
+        try
+        {
+            _dashboard = await InpatientApi.GetDashboardSummaryAsync();
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"Dashboard verileri yüklenirken hata oluştu: {ex.Message}";
+        }
+        finally
+        {
+            _isLoading = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task StartRealtimeConnectionAsync()
+    {
+        try
+        {
+            _hubConnection = new HubConnectionBuilder()
+                .WithUrl(Navigation.ToAbsoluteUri("/hubs/hospital"))
+                .WithAutomaticReconnect()
+                .Build();
+
+            _hubConnection.On<object>("InpatientBedChanged", async _ =>
+            {
+                await InvokeAsync(LoadDashboardAsync);
+            });
+
+            _hubConnection.On<object>("InpatientAdmissionChanged", async _ =>
+            {
+                await InvokeAsync(LoadDashboardAsync);
+            });
+
+            _hubConnection.On<object>("InpatientTransferChanged", async _ =>
+            {
+                await InvokeAsync(LoadDashboardAsync);
+            });
+
+            _hubConnection.On<object>("InpatientDischargeCompleted", async _ =>
+            {
+                await InvokeAsync(LoadDashboardAsync);
+            });
+
+            _hubConnection.On<object>("InpatientDashboardUpdated", async _ =>
+            {
+                await InvokeAsync(LoadDashboardAsync);
+            });
+
+            _hubConnection.Reconnected += async _ =>
+            {
+                _isHubConnected = true;
+                await InvokeAsync(LoadDashboardAsync);
+            };
+
+            _hubConnection.Closed += async _ =>
+            {
+                _isHubConnected = false;
+                await InvokeAsync(StateHasChanged);
+            };
+
+            await _hubConnection.StartAsync();
+            _isHubConnected = true;
+            StateHasChanged();
+        }
+        catch
+        {
+            _isHubConnected = false;
+        }
+    }
+
+    private static string GetProgressBarClass(double percentage) =>
+        percentage switch
+        {
+            >= 90 => "bg-danger",
+            >= 75 => "bg-warning",
+            _ => "bg-success",
+        };
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_hubConnection != null)
+        {
+            try
+            {
+                await _hubConnection.DisposeAsync();
+            }
+            catch
+            {
+            }
+        }
+    }
+}

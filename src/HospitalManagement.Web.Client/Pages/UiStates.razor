@@ -1,0 +1,17 @@
+@page "/ui-states"
+@inject IStringLocalizer<SharedResources> Localizer
+
+<PageTitle>@Localizer["StatePageTitle"]</PageTitle>
+
+<header class="page-heading">
+    <span class="page-eyebrow">@Localizer["StatePageEyebrow"]</span>
+    <h1>@Localizer["StatePageHeading"]</h1>
+    <p>@Localizer["StatePageDescription"]</p>
+</header>
+
+<div class="state-gallery" aria-label="@Localizer["InterfaceStates"]">
+    <LoadingState />
+    <EmptyState ActionText="@Localizer["ReturnToOverview"]" ActionHref="/" />
+    <ErrorState ActionText="@Localizer["Retry"]" ActionHref="/ui-states" />
+    <ForbiddenState ActionText="@Localizer["ReturnToOverview"]" ActionHref="/" />
+</div>

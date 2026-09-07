@@ -1,0 +1,518 @@
+@page "/specialty/deliveries"
+@using HospitalManagement.Contracts.Specialty
+@using HospitalManagement.Web.Client.Specialty
+@using Microsoft.AspNetCore.Authorization
+@attribute [Authorize]
+@inject ISpecialtyCareApiClient SpecialtyClient
+
+<PageTitle>Doğum ve Yenidoğan Kayıtları — Hastane Yönetim Sistemi</PageTitle>
+
+<div class="container-fluid px-4 py-3">
+    <!-- Clinical Simulation Disclaimer Banner -->
+    <div class="alert alert-warning border-warning d-flex align-items-center mb-4" role="alert">
+        <i class="bi bi-exclamation-triangle-fill fs-4 me-3 text-warning"></i>
+        <div>
+            <strong>Klinik Simülasyon Bildirimi:</strong> Bu modül eğitim ve yönetim simülasyonu amaçlıdır; sertifikalı doğum kayıt sistemi veya klinik karar desteği niteliği taşımaz. Tıbbi süreçler ilgili uzman hekim ve ebe sorumluluğundadır.
+        </div>
+    </div>
+
+    <!-- Header & Action Bar -->
+    <div class="d-flex justify-content-between align-items-center mb-4 pb-2 border-bottom">
+        <div>
+            <h2 class="h3 fw-bold text-primary mb-1">Doğum ve Yenidoğan Kayıt Panosu</h2>
+            <p class="text-muted small mb-0">Doğum salonu kayıtları, doğum yöntemleri, perineal durum ve Apgar skorlu yenidoğan izlemi.</p>
+        </div>
+        <div>
+            <button class="btn btn-primary d-flex align-items-center gap-2" @onclick="OpenCreateDeliveryModal">
+                <i class="bi bi-plus-circle"></i>
+                <span>Yeni Doğum Kaydı Başlat</span>
+            </button>
+        </div>
+    </div>
+
+    @if (_isLoading)
+    {
+        <div class="text-center py-5">
+            <div class="spinner-border text-primary" role="status">
+                <span class="visually-hidden">Yükleniyor...</span>
+            </div>
+            <p class="text-muted mt-2">Doğum kayıtları yükleniyor...</p>
+        </div>
+    }
+    else if (_errorMessage is not null)
+    {
+        <div class="alert alert-danger" role="alert">
+            <i class="bi bi-x-circle me-2"></i>@_errorMessage
+        </div>
+    }
+    else
+    {
+        <!-- Patient Filter & Search -->
+        <div class="card shadow-sm mb-4 border-0">
+            <div class="card-body">
+                <div class="row g-3 align-items-end">
+                    <div class="col-md-6">
+                        <label class="form-label fw-semibold small">Anne Hasta ID</label>
+                        <div class="input-group">
+                            <input type="text" class="form-control" placeholder="00000000-0000-0000-0000-000000000201" @bind="_searchMotherId" />
+                            <button class="btn btn-outline-primary" type="button" @onclick="SearchDeliveries">
+                                <i class="bi bi-search me-1"></i>Sorgula
+                            </button>
+                        </div>
+                    </div>
+                    <div class="col-md-6 text-end">
+                        <span class="badge bg-light text-dark border p-2">
+                            Kayıt Sayısı: <strong>@_deliveries.Count</strong>
+                        </span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        @if (_deliveries.Count == 0)
+        {
+            <div class="card shadow-sm border-0 text-center py-5">
+                <div class="card-body">
+                    <i class="bi bi-heart-pulse text-muted display-4 mb-3 d-block"></i>
+                    <h5 class="fw-bold text-secondary">Kayıtlı Doğum Bulunmuyor</h5>
+                    <p class="text-muted small">Anne hasta ID girerek sorgulama yapabilir veya yukarıdaki butonla yeni doğum kaydı ekleyebilirsiniz.</p>
+                </div>
+            </div>
+        }
+        else
+        {
+            <div class="row g-4">
+                @foreach (var del in _deliveries)
+                {
+                    <div class="col-12">
+                        <div class="card shadow-sm border-0">
+                            <div class="card-header bg-light d-flex justify-content-between align-items-center py-3">
+                                <div>
+                                    <span class="badge bg-primary me-2">@del.DeliveryProtocolNumber</span>
+                                    <span class="fw-bold text-dark me-3">Anne ID: @del.MotherPatientId</span>
+                                    <span class="badge bg-info text-dark">@GetDeliveryModeLabel(del.DeliveryMode)</span>
+                                </div>
+                                <div class="d-flex align-items-center gap-2">
+                                    <span class="text-muted small me-2"><i class="bi bi-calendar3 me-1"></i>@del.DeliveryTimeUtc.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</span>
+                                    <button class="btn btn-sm btn-outline-success" @onclick="() => OpenAddNewbornModal(del.Id)">
+                                        <i class="bi bi-plus-lg me-1"></i>Bebek Ekle
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="card-body">
+                                <div class="row g-3 mb-3">
+                                    <div class="col-md-3">
+                                        <div class="p-2 bg-light rounded text-center">
+                                            <span class="text-muted small d-block">Gebelik Haftası</span>
+                                            <strong class="text-primary fs-5">@del.GestationalAgeWeeks+@del.GestationalAgeDays</strong>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-3">
+                                        <div class="p-2 bg-light rounded text-center">
+                                            <span class="text-muted small d-block">Perineal Durum</span>
+                                            <strong class="text-secondary fs-6">@GetPerinealTearLabel(del.PerinealTear)</strong>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-3">
+                                        <div class="p-2 bg-light rounded text-center">
+                                            <span class="text-muted small d-block">Tahmini Kan Kaybı</span>
+                                            <strong class="text-danger fs-5">@del.EstimatedBloodLossMl.ToString("N0") mL</strong>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-3">
+                                        <div class="p-2 bg-light rounded text-center">
+                                            <span class="text-muted small d-block">Yenidoğan Sayısı</span>
+                                            <strong class="text-success fs-5">@del.Newborns.Count</strong>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                @if (!string.IsNullOrWhiteSpace(del.DeliverySummaryNotes) || !string.IsNullOrWhiteSpace(del.MaternalComplicationsNotes))
+                                {
+                                    <div class="mb-3 p-3 bg-light rounded small">
+                                        @if (!string.IsNullOrWhiteSpace(del.DeliverySummaryNotes))
+                                        {
+                                            <div><strong>Özet Notu:</strong> @del.DeliverySummaryNotes</div>
+                                        }
+                                        @if (!string.IsNullOrWhiteSpace(del.MaternalComplicationsNotes))
+                                        {
+                                            <div class="text-danger mt-1"><strong>Maternal Komplikasyon:</strong> @del.MaternalComplicationsNotes</div>
+                                        }
+                                    </div>
+                                }
+
+                                <!-- Newborns Accordion / List -->
+                                <h6 class="fw-bold text-secondary mb-2"><i class="bi bi-person-heart me-1"></i>Yenidoğan (Bebek) Bilgileri (@del.Newborns.Count)</h6>
+                                @if (del.Newborns.Count == 0)
+                                {
+                                    <div class="text-muted small fst-italic">Henüz yenidoğan kaydı eklenmedi.</div>
+                                }
+                                else
+                                {
+                                    <div class="table-responsive">
+                                        <table class="table table-sm table-bordered align-middle mb-0">
+                                            <thead class="table-light">
+                                                <tr>
+                                                    <th>Sıra</th>
+                                                    <th>Cinsiyet</th>
+                                                    <th>Doğum Saati</th>
+                                                    <th>Kilo (g)</th>
+                                                    <th>Boy (cm)</th>
+                                                    <th>Baş Çev. (cm)</th>
+                                                    <th>Apgar (1'/5'/10')</th>
+                                                    <th>Resüsitasyon</th>
+                                                    <th>Kordon pH</th>
+                                                    <th>Hasta ID</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                @foreach (var nb in del.Newborns)
+                                                {
+                                                    <tr>
+                                                        <td class="fw-bold text-center">#@nb.BirthOrder</td>
+                                                        <td>
+                                                            @if (nb.Gender == "Male")
+                                                            {
+                                                                <span class="badge bg-primary">Erkek</span>
+                                                            }
+                                                            else if (nb.Gender == "Female")
+                                                            {
+                                                                <span class="badge bg-danger">Kız</span>
+                                                            }
+                                                            else
+                                                            {
+                                                                <span class="badge bg-secondary">Belirsiz</span>
+                                                            }
+                                                        </td>
+                                                        <td class="small">@nb.BirthTimeUtc.ToLocalTime().ToString("HH:mm")</td>
+                                                        <td class="fw-semibold">@nb.BirthWeightGrams.ToString("N0") g</td>
+                                                        <td>@nb.BirthLengthCm cm</td>
+                                                        <td>@nb.HeadCircumferenceCm cm</td>
+                                                        <td>
+                                                            <span class="badge @(nb.ApgarScore5Min >= 7 ? "bg-success" : "bg-warning text-dark")">
+                                                                @nb.ApgarScore1Min / @nb.ApgarScore5Min @(nb.ApgarScore10Min.HasValue ? $" / {nb.ApgarScore10Min}" : "")
+                                                            </span>
+                                                        </td>
+                                                        <td class="small">@GetResuscitationLabel(nb.ResuscitationGiven)</td>
+                                                        <td class="small">@(nb.CordBloodPh ?? "-")</td>
+                                                        <td class="small text-muted">@(nb.NewbornPatientId.ToString()[..8] + "...")</td>
+                                                    </tr>
+                                                }
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                }
+                            </div>
+                        </div>
+                    </div>
+                }
+            </div>
+        }
+    }
+</div>
+
+<!-- Modal: Create Delivery -->
+@if (_showCreateModal)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title fw-bold">Yeni Doğum Kaydı Başlat</h5>
+                    <button type="button" class="btn-close" @onclick="() => _showCreateModal = false"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <label class="form-label small fw-semibold">Anne Hasta ID *</label>
+                            <input type="text" class="form-control" @bind="_createReq.MotherPatientId" />
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label small fw-semibold">Sorumlu Hekim ID *</label>
+                            <input type="text" class="form-control" @bind="_createReq.AttendingDoctorId" />
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label small fw-semibold">Doğum Yöntemi *</label>
+                            <select class="form-select" @bind="_createReq.DeliveryMode">
+                                <option value="SpontaneousVaginal">Spontan Vajinal Doğum (Normal)</option>
+                                <option value="AssistedVaginalVacuum">Vakumlu Müdahaleli Doğum</option>
+                                <option value="AssistedVaginalForceps">Forsepsli Müdahaleli Doğum</option>
+                                <option value="CesareanElective">Elektif Sezaryen</option>
+                                <option value="CesareanEmergency">Acil Sezaryen</option>
+                                <option value="Vbac">Sezaryen Sonrası Normal Doğum (SSVD)</option>
+                            </select>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label small fw-semibold">Doğum Zamanı (UTC)</label>
+                            <input type="datetime-local" class="form-control" @bind="_createReq.DeliveryTimeUtc" />
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label small fw-semibold">Gebelik Haftası *</label>
+                            <input type="number" class="form-control" min="20" max="45" @bind="_createReq.GestationalAgeWeeks" />
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label small fw-semibold">Gebelik Günü (0-6)</label>
+                            <input type="number" class="form-control" min="0" max="6" @bind="_createReq.GestationalAgeDays" />
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label small fw-semibold">Perineal Durum</label>
+                            <select class="form-select" @bind="_createReq.PerinealTear">
+                                <option value="None">Yırtık Yok (İntakt)</option>
+                                <option value="FirstDegree">1. Derece Yırtık</option>
+                                <option value="SecondDegree">2. Derece Yırtık</option>
+                                <option value="ThirdDegree">3. Derece Yırtık</option>
+                                <option value="FourthDegree">4. Derece Yırtık</option>
+                                <option value="Episiotomy">Epizyotomi Yapıldı</option>
+                            </select>
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label small fw-semibold">Tahmini Kan Kaybı (mL)</label>
+                            <input type="number" class="form-control" min="0" step="50" @bind="_createReq.EstimatedBloodLossMl" />
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label small fw-semibold">Doğum Özet Notu</label>
+                            <textarea class="form-control" rows="2" placeholder="Doğum seyri, plasenta çıkışı, anestezi..." @bind="_createReq.DeliverySummaryNotes"></textarea>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" @onclick="() => _showCreateModal = false">İptal</button>
+                    <button type="button" class="btn btn-primary" @onclick="SubmitCreateDelivery">Kaydet</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+<!-- Modal: Add Newborn -->
+@if (_showNewbornModal)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title fw-bold">Yenidoğan (Bebek) Kaydı Ekle</h5>
+                    <button type="button" class="btn-close" @onclick="() => _showNewbornModal = false"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="row g-3">
+                        <div class="col-12">
+                            <label class="form-label small fw-semibold">Yenidoğan Patient ID *</label>
+                            <input type="text" class="form-control" @bind="_newbornReq.NewbornPatientId" />
+                            <small class="text-muted">Önceden Patients modülünde açılmış, anne kaydından ayrı sentetik Patient kimliği.</small>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label small fw-semibold">Doğum Sırası *</label>
+                            <input type="number" class="form-control" min="1" max="10" @bind="_newbornReq.BirthOrder" />
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label small fw-semibold">Cinsiyet *</label>
+                            <select class="form-select" @bind="_newbornReq.Gender">
+                                <option value="Male">Erkek</option>
+                                <option value="Female">Kız</option>
+                                <option value="Undetermined">Belirsiz</option>
+                            </select>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label small fw-semibold">Doğum Zamanı (UTC)</label>
+                            <input type="datetime-local" class="form-control" @bind="_newbornReq.BirthTimeUtc" />
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label small fw-semibold">Doğum Ağırlığı (g) *</label>
+                            <input type="number" class="form-control" min="300" max="7000" step="10" @bind="_newbornReq.BirthWeightGrams" />
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label small fw-semibold">Boy (cm) *</label>
+                            <input type="number" class="form-control" min="20" max="70" step="0.5" @bind="_newbornReq.BirthLengthCm" />
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label small fw-semibold">Baş Çevresi (cm) *</label>
+                            <input type="number" class="form-control" min="15" max="50" step="0.5" @bind="_newbornReq.HeadCircumferenceCm" />
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label small fw-semibold">1. Dk Apgar (0-10) *</label>
+                            <input type="number" class="form-control" min="0" max="10" @bind="_newbornReq.ApgarScore1Min" />
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label small fw-semibold">5. Dk Apgar (0-10) *</label>
+                            <input type="number" class="form-control" min="0" max="10" @bind="_newbornReq.ApgarScore5Min" />
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label small fw-semibold">10. Dk Apgar (0-10)</label>
+                            <input type="number" class="form-control" min="0" max="10" @bind="_newbornReq.ApgarScore10Min" />
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label small fw-semibold">Resüsitasyon Müdahalesi</label>
+                            <select class="form-select" @bind="_newbornReq.ResuscitationGiven">
+                                <option value="None">Müdahale Gerekmedi</option>
+                                <option value="Stimulation">Taktil Stimülasyon</option>
+                                <option value="Suction">Aspirasyon</option>
+                                <option value="SupplementalOxygen">Serbest Akış Oksijen</option>
+                                <option value="BagValveMask">Balon-Maske Ventilasyon</option>
+                                <option value="Intubation">Endotrakeal Entübasyon</option>
+                                <option value="ChestCompressions">Göğüs Kompresyonu</option>
+                                <option value="Medication">İlaç (Adrenalin vb.)</option>
+                            </select>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label small fw-semibold">Kordon Kanı pH</label>
+                            <input type="text" class="form-control" placeholder="7.32" @bind="_newbornReq.CordBloodPh" />
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label small fw-semibold">Komplikasyon / Yenidoğan Notları</label>
+                            <textarea class="form-control" rows="2" placeholder="Doğum anomalisi, mekonyum, küvöz ihtiyacı..." @bind="_newbornReq.ComplicationsNotes"></textarea>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" @onclick="() => _showNewbornModal = false">İptal</button>
+                    <button type="button" class="btn btn-success" @onclick="SubmitAddNewborn">Bebeği Kaydet</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private bool _isLoading = false;
+    private string? _errorMessage;
+    private string _searchMotherId = "00000000-0000-0000-0000-000000000201";
+    private List<DeliveryRecordResponse> _deliveries = [];
+
+    private bool _showCreateModal = false;
+    private CreateDeliveryRecordRequest _createReq = new();
+
+    private bool _showNewbornModal = false;
+    private Guid _targetDeliveryId;
+    private AddNewbornRequest _newbornReq = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        await SearchDeliveries();
+    }
+
+    private async Task SearchDeliveries()
+    {
+        _isLoading = true;
+        _errorMessage = null;
+
+        try
+        {
+            if (Guid.TryParse(_searchMotherId, out var motherId))
+            {
+                _deliveries = await SpecialtyClient.GetDeliveryRecordsByMotherPatientIdAsync(motherId);
+            }
+            else
+            {
+                _deliveries = [];
+            }
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"Doğum kayıtları yüklenirken hata: {ex.Message}";
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+    }
+
+    private void OpenCreateDeliveryModal()
+    {
+        _createReq = new CreateDeliveryRecordRequest
+        {
+            MotherPatientId = Guid.TryParse(_searchMotherId, out var mId) ? mId : Guid.Parse("00000000-0000-0000-0000-000000000201"),
+            AttendingDoctorId = Guid.Parse("00000000-0000-0000-0000-000000000102"),
+            DeliveryMode = "SpontaneousVaginal",
+            DeliveryTimeUtc = DateTime.UtcNow,
+            GestationalAgeWeeks = 39,
+            GestationalAgeDays = 2,
+            PerinealTear = "None",
+            EstimatedBloodLossMl = 250,
+        };
+        _showCreateModal = true;
+    }
+
+    private async Task SubmitCreateDelivery()
+    {
+        try
+        {
+            await SpecialtyClient.CreateDeliveryRecordAsync(_createReq);
+            _showCreateModal = false;
+            await SearchDeliveries();
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"Doğum oluşturulurken hata: {ex.Message}";
+        }
+    }
+
+    private void OpenAddNewbornModal(Guid deliveryId)
+    {
+        _targetDeliveryId = deliveryId;
+        _newbornReq = new AddNewbornRequest
+        {
+            NewbornPatientId = Guid.Empty,
+            BirthOrder = 1,
+            BirthTimeUtc = DateTime.UtcNow,
+            Gender = "Female",
+            BirthWeightGrams = 3250,
+            BirthLengthCm = 50.0m,
+            HeadCircumferenceCm = 35.0m,
+            ApgarScore1Min = 8,
+            ApgarScore5Min = 9,
+            ResuscitationGiven = "None",
+            CordBloodPh = "7.35",
+        };
+        _showNewbornModal = true;
+    }
+
+    private async Task SubmitAddNewborn()
+    {
+        try
+        {
+            await SpecialtyClient.AddNewbornAsync(_targetDeliveryId, _newbornReq);
+            _showNewbornModal = false;
+            await SearchDeliveries();
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"Yenidoğan eklenirken hata: {ex.Message}";
+        }
+    }
+
+    private static string GetDeliveryModeLabel(string mode) => mode switch
+    {
+        "SpontaneousVaginal" => "Spontan Vajinal Doğum",
+        "AssistedVaginalVacuum" => "Vakum Destekli Doğum",
+        "AssistedVaginalForceps" => "Forseps Destekli Doğum",
+        "CesareanElective" => "Elektif Sezaryen",
+        "CesareanEmergency" => "Acil Sezaryen",
+        "Vbac" => "Sezaryen Sonrası Vajinal (SSVD)",
+        _ => mode,
+    };
+
+    private static string GetPerinealTearLabel(string tear) => tear switch
+    {
+        "None" => "İntakt / Yırtık Yok",
+        "FirstDegree" => "1. Derece Yırtık",
+        "SecondDegree" => "2. Derece Yırtık",
+        "ThirdDegree" => "3. Derece Yırtık",
+        "FourthDegree" => "4. Derece Yırtık",
+        "Episiotomy" => "Epizyotomi",
+        _ => tear,
+    };
+
+    private static string GetResuscitationLabel(string r) => r switch
+    {
+        "None" => "Gerekmedi",
+        "Stimulation" => "Stimülasyon",
+        "Suction" => "Aspirasyon",
+        "SupplementalOxygen" => "Serbest Oksijen",
+        "BagValveMask" => "Balon-Maske",
+        "Intubation" => "Entübasyon",
+        "ChestCompressions" => "Kompresyon",
+        "Medication" => "İlaç",
+        _ => r,
+    };
+}

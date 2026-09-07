@@ -1,0 +1,441 @@
+@page "/icu/flowsheet/{AdmissionId:guid}"
+@using HospitalManagement.Contracts.Surgery
+@using HospitalManagement.Web.Client.Surgery
+@inject IIcuApiClient IcuApi
+@inject NavigationManager Navigation
+
+<div class="container-fluid py-4">
+    <!-- Header -->
+    <div class="d-flex flex-wrap justify-content-between align-items-center mb-4 gap-2">
+        <div>
+            <div class="d-flex align-items-center gap-2 mb-1">
+                <button class="btn btn-sm btn-outline-secondary" @onclick='() => Navigation.NavigateTo("/icu/beds")'>
+                    <i class="bi bi-arrow-left me-1"></i>Yataklara Dön
+                </button>
+                <h2 class="fw-bold mb-0 text-dark">
+                    <i class="bi bi-activity text-danger me-2"></i>Yoğun Bakım Akış Sayfası (ICU Flowsheet)
+                </h2>
+            </div>
+            @if (_admission != null)
+            {
+                <p class="text-muted small mb-0">
+                    Protokol: <strong class="text-primary font-monospace">@_admission.AdmissionProtocolNumber</strong> |
+                    Yatak: <span class="badge bg-secondary">@_admission.IcuBedCode</span> |
+                    Kritiklik: <span class="badge bg-danger">@_admission.AcuityLevel</span> |
+                    Ventilasyon: <span class="badge bg-info text-dark">@_admission.VentilationMode</span>
+                </p>
+            }
+        </div>
+        <div class="d-flex gap-2">
+            <button class="btn btn-outline-secondary" @onclick="LoadDataAsync" disabled="@_isLoading">
+                <i class="bi bi-arrow-clockwise me-1"></i>Yenile
+            </button>
+            <button class="btn btn-danger" @onclick="OpenAddEntryModal">
+                <i class="bi bi-plus-circle me-1"></i>Yeni Saatlik Gözlem Ekle
+            </button>
+        </div>
+    </div>
+
+    <!-- Alert Messages -->
+    @if (!string.IsNullOrWhiteSpace(_errorMessage))
+    {
+        <div class="alert alert-danger alert-dismissible fade show" role="alert">
+            <i class="bi bi-exclamation-triangle-fill me-2"></i>@_errorMessage
+            <button type="button" class="btn-close" @onclick="() => _errorMessage = null"></button>
+        </div>
+    }
+    @if (!string.IsNullOrWhiteSpace(_successMessage))
+    {
+        <div class="alert alert-success alert-dismissible fade show" role="alert">
+            <i class="bi bi-check-circle-fill me-2"></i>@_successMessage
+            <button type="button" class="btn-close" @onclick="() => _successMessage = null"></button>
+        </div>
+    }
+
+    <!-- Simulation Notice Banner -->
+    <div class="alert alert-info py-2 small d-flex align-items-center mb-4">
+        <i class="bi bi-info-circle-fill fs-5 me-2"></i>
+        <div>
+            <strong>Eğitim &amp; Simülasyon Uyarısı:</strong> Yoğun bakım akış verileri klinik eğitim ve simülasyon amaçlıdır. Doğrudan donanım/cihaz entegrasyonu içermez; tüm parametreler klinik personel tarafından girilir.
+        </div>
+    </div>
+
+    @if (_fluidSummary != null)
+    {
+        <!-- 24-Hour Fluid Balance Summary Cards -->
+        <div class="row g-3 mb-4">
+            <div class="col-6 col-md-4 col-xl-2">
+                <div class="card border-0 shadow-sm text-center p-3">
+                    <div class="text-muted small">IV Sıvı Girişi (24s)</div>
+                    <div class="fs-5 fw-bold text-primary">@_fluidSummary.TotalIvIntakeMl ml</div>
+                </div>
+            </div>
+            <div class="col-6 col-md-4 col-xl-2">
+                <div class="card border-0 shadow-sm text-center p-3">
+                    <div class="text-muted small">Enteral Beslenme (24s)</div>
+                    <div class="fs-5 fw-bold text-info">@_fluidSummary.TotalEnteralIntakeMl ml</div>
+                </div>
+            </div>
+            <div class="col-6 col-md-4 col-xl-2">
+                <div class="card border-0 shadow-sm text-center p-3">
+                    <div class="text-muted small">Toplam Giriş (24s)</div>
+                    <div class="fs-5 fw-bold text-success">+@_fluidSummary.TotalIntakeMl ml</div>
+                </div>
+            </div>
+            <div class="col-6 col-md-4 col-xl-2">
+                <div class="card border-0 shadow-sm text-center p-3">
+                    <div class="text-muted small">İdrar Çıkışı (24s)</div>
+                    <div class="fs-5 fw-bold text-warning">@_fluidSummary.TotalUrineOutputMl ml</div>
+                </div>
+            </div>
+            <div class="col-6 col-md-4 col-xl-2">
+                <div class="card border-0 shadow-sm text-center p-3">
+                    <div class="text-muted small">Dren Çıkışı (24s)</div>
+                    <div class="fs-5 fw-bold text-secondary">@_fluidSummary.TotalDrainOutputMl ml</div>
+                </div>
+            </div>
+            <div class="col-6 col-md-4 col-xl-2">
+                <div class="card border-0 shadow-sm text-center p-3 @(_fluidSummary.NetBalanceMl >= 0 ? "border-start border-success border-4" : "border-start border-danger border-4")">
+                    <div class="text-muted small">Net Sıvı Dengesi (24s)</div>
+                    <div class="fs-5 fw-bold @(_fluidSummary.NetBalanceMl >= 0 ? "text-success" : "text-danger")">
+                        @(_fluidSummary.NetBalanceMl >= 0 ? "+" : "")@_fluidSummary.NetBalanceMl ml
+                    </div>
+                </div>
+            </div>
+        </div>
+    }
+
+    @if (_isLoading)
+    {
+        <div class="text-center py-5">
+            <div class="spinner-border text-primary" role="status"></div>
+            <p class="text-muted mt-2">Yoğun bakım akış verileri yükleniyor...</p>
+        </div>
+    }
+    else if (_entries.Count == 0)
+    {
+        <div class="card border-0 shadow-sm p-5 text-center text-muted">
+            <i class="bi bi-clipboard2-pulse fs-1 mb-2"></i>
+            <h5>Henüz kaydedilmiş saatlik gözlem bulunmuyor.</h5>
+            <p>Bu hasta için ilk saatlik vital, ventilatör veya sıvı takibi gözlemini girmek için butona tıklayınız.</p>
+            <div class="mt-2">
+                <button class="btn btn-outline-danger" @onclick="OpenAddEntryModal">
+                    <i class="bi bi-plus-circle me-1"></i>İlk Gözlemi Ekle
+                </button>
+            </div>
+        </div>
+    }
+    else
+    {
+        <!-- Flowsheet Table -->
+        <div class="card border-0 shadow-sm">
+            <div class="card-header bg-white py-3">
+                <h5 class="fw-bold mb-0 text-dark"><i class="bi bi-table me-2"></i>Saatlik Vital Bulgular &amp; Akış Tablosu</h5>
+            </div>
+            <div class="table-responsive">
+                <table class="table table-hover table-striped align-middle mb-0 small">
+                    <thead class="table-light">
+                        <tr>
+                            <th>Saat (Kayıt Zamanı)</th>
+                            <th>HR (bpm)</th>
+                            <th>Tansiyon (MAP)</th>
+                            <th>RR (dk)</th>
+                            <th>SpO2</th>
+                            <th>Ateş</th>
+                            <th>GCS</th>
+                            <th>RASS</th>
+                            <th>Ventilasyon &amp; Parametreler</th>
+                            <th>Sıvı Giriş</th>
+                            <th>Sıvı Çıkış</th>
+                            <th>Net Bakiye</th>
+                            <th>Klinik Notlar</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var entry in _entries)
+                        {
+                            <tr>
+                                <td class="fw-bold font-monospace">@entry.RecordedAtUtc.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</td>
+                                <td>
+                                    @if (entry.HeartRateBpm.HasValue)
+                                    {
+                                        <span class="@(entry.HeartRateBpm.Value is < 60 or > 100 ? "text-danger fw-bold" : "text-dark")">@entry.HeartRateBpm bpm</span>
+                                    }
+                                    else { <span class="text-muted">-</span> }
+                                </td>
+                                <td>
+                                    @if (entry.SystolicBpMmHg.HasValue && entry.DiastolicBpMmHg.HasValue)
+                                    {
+                                        <span class="fw-bold">@entry.SystolicBpMmHg/@entry.DiastolicBpMmHg</span>
+                                        @if (entry.MeanArterialPressureMmHg.HasValue)
+                                        {
+                                            <span class="text-muted ms-1">(MAP @entry.MeanArterialPressureMmHg)</span>
+                                        }
+                                    }
+                                    else { <span class="text-muted">-</span> }
+                                </td>
+                                <td>@(entry.RespiratoryRateBpm.HasValue ? $"{entry.RespiratoryRateBpm}/dk" : "-")</td>
+                                <td>
+                                    @if (entry.OxygenSaturationPct.HasValue)
+                                    {
+                                        <span class="@(entry.OxygenSaturationPct.Value < 92 ? "text-danger fw-bold" : "text-dark")">%@entry.OxygenSaturationPct.Value.ToString("F0")</span>
+                                    }
+                                    else { <span class="text-muted">-</span> }
+                                </td>
+                                <td>@(entry.BodyTemperatureCelsius.HasValue ? $"{entry.BodyTemperatureCelsius.Value:F1} °C" : "-")</td>
+                                <td>@(entry.GlasgowComaScale.HasValue ? $"{entry.GlasgowComaScale}/15" : "-")</td>
+                                <td>@(entry.RichmondAgitationSedationScale.HasValue ? $"RASS {entry.RichmondAgitationSedationScale:+0;-#;0}" : "-")</td>
+                                <td>
+                                    <span class="badge bg-secondary mb-1">@entry.VentilationMode</span>
+                                    @if (entry.FractionOfInspiredOxygenPct.HasValue || entry.PositiveEndExpiratoryPressure.HasValue)
+                                    {
+                                        <div class="text-muted small">
+                                            @(entry.FractionOfInspiredOxygenPct.HasValue ? $"FiO2: %{entry.FractionOfInspiredOxygenPct} " : "")
+                                            @(entry.PositiveEndExpiratoryPressure.HasValue ? $"PEEP: {entry.PositiveEndExpiratoryPressure} " : "")
+                                            @(entry.TidalVolumeMl.HasValue ? $"Vt: {entry.TidalVolumeMl}ml " : "")
+                                        </div>
+                                    }
+                                </td>
+                                <td class="text-success">
+                                    +@entry.TotalIntakeMl ml
+                                    @if (entry.IvFluidIntakeMl.HasValue || entry.EnteralNutritionIntakeMl.HasValue)
+                                    {
+                                        <div class="text-muted small">
+                                            @(entry.IvFluidIntakeMl.HasValue ? $"IV: {entry.IvFluidIntakeMl} " : "")
+                                            @(entry.EnteralNutritionIntakeMl.HasValue ? $"Ent: {entry.EnteralNutritionIntakeMl}" : "")
+                                        </div>
+                                    }
+                                </td>
+                                <td class="text-danger">
+                                    -@entry.TotalOutputMl ml
+                                    @if (entry.UrineOutputMl.HasValue || entry.DrainOutputMl.HasValue)
+                                    {
+                                        <div class="text-muted small">
+                                            @(entry.UrineOutputMl.HasValue ? $"İdr: {entry.UrineOutputMl} " : "")
+                                            @(entry.DrainOutputMl.HasValue ? $"Drn: {entry.DrainOutputMl}" : "")
+                                        </div>
+                                    }
+                                </td>
+                                <td>
+                                    <span class="badge @(entry.NetFluidBalanceMl >= 0 ? "bg-success" : "bg-warning text-dark")">
+                                        @(entry.NetFluidBalanceMl >= 0 ? "+" : "")@entry.NetFluidBalanceMl ml
+                                    </span>
+                                </td>
+                                <td class="text-truncate" style="max-width: 200px;" title="@entry.ClinicalNotes">
+                                    @(string.IsNullOrWhiteSpace(entry.ClinicalNotes) ? "-" : entry.ClinicalNotes)
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    }
+</div>
+
+<!-- Modal: Yeni Saatlik Gözlem Ekle -->
+@if (_showAddModal)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal-dialog modal-xl modal-dialog-centered">
+            <div class="modal-content border-0 shadow">
+                <div class="modal-header bg-danger text-white">
+                    <h5 class="modal-title"><i class="bi bi-plus-circle me-2"></i>Saatlik Yoğun Bakım Gözlemi Ekle</h5>
+                    <button type="button" class="btn-close btn-close-white" @onclick="() => _showAddModal = false"></button>
+                </div>
+                <div class="modal-body">
+                    <!-- Section 1: Vital Bulgular -->
+                    <h6 class="fw-bold text-danger border-bottom pb-2 mb-3"><i class="bi bi-heart-pulse me-1"></i>Vital Bulgular</h6>
+                    <div class="row g-3 mb-4">
+                        <div class="col-md-3">
+                            <label class="form-label small fw-bold">Kalp Hızı (HR - bpm)</label>
+                            <input type="number" class="form-control" @bind="_request.HeartRateBpm" placeholder="Örn: 85" />
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label small fw-bold">Sistolik Tansiyon (mmHg)</label>
+                            <input type="number" class="form-control" @bind="_request.SystolicBpMmHg" placeholder="Örn: 120" />
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label small fw-bold">Diyastolik Tansiyon (mmHg)</label>
+                            <input type="number" class="form-control" @bind="_request.DiastolicBpMmHg" placeholder="Örn: 80" />
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label small fw-bold">Solunum Sayısı (RR / dk)</label>
+                            <input type="number" class="form-control" @bind="_request.RespiratoryRateBpm" placeholder="Örn: 16" />
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label small fw-bold">Oksijen Saturasyonu (SpO2 %)</label>
+                            <input type="number" step="0.1" class="form-control" @bind="_request.OxygenSaturationPct" placeholder="Örn: 98" />
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label small fw-bold">Vücut Sıcaklığı (°C)</label>
+                            <input type="number" step="0.1" class="form-control" @bind="_request.BodyTemperatureCelsius" placeholder="Örn: 36.8" />
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label small fw-bold">Glasgow Koma Skalası (GCS 3-15)</label>
+                            <input type="number" class="form-control" @bind="_request.GlasgowComaScale" placeholder="Örn: 15" />
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label small fw-bold">RASS Sedasyon Skoru (-5..+4)</label>
+                            <input type="number" class="form-control" @bind="_request.RichmondAgitationSedationScale" placeholder="Örn: 0" />
+                        </div>
+                    </div>
+
+                    <!-- Section 2: Ventilasyon Parametreleri -->
+                    <h6 class="fw-bold text-primary border-bottom pb-2 mb-3"><i class="bi bi-wind me-1"></i>Ventilatör Takibi</h6>
+                    <div class="row g-3 mb-4">
+                        <div class="col-md-4">
+                            <label class="form-label small fw-bold">Ventilasyon Modu</label>
+                            <select class="form-select" @bind="_request.VentilationMode">
+                                <option value="NoneSpontaneous">Spontan Solunum (Oda Havası / Nazal O2)</option>
+                                <option value="HighFlowNasalCannula">Yüksek Akışlı Nazal Kanül (HFNC)</option>
+                                <option value="NonInvasiveCpapBiPap">Non-İnvaziv Ventilasyon (NIV/CPAP/BiPAP)</option>
+                                <option value="InvasiveMechanical">İnvaziv Mekanik Ventilasyon (Endotrakeal)</option>
+                            </select>
+                        </div>
+                        <div class="col-md-2">
+                            <label class="form-label small fw-bold">FiO2 (%)</label>
+                            <input type="number" class="form-control" @bind="_request.FractionOfInspiredOxygenPct" placeholder="Örn: 40" />
+                        </div>
+                        <div class="col-md-2">
+                            <label class="form-label small fw-bold">PEEP (cmH2O)</label>
+                            <input type="number" class="form-control" @bind="_request.PositiveEndExpiratoryPressure" placeholder="Örn: 8" />
+                        </div>
+                        <div class="col-md-2">
+                            <label class="form-label small fw-bold">Tidal Hacim (Vt ml)</label>
+                            <input type="number" class="form-control" @bind="_request.TidalVolumeMl" placeholder="Örn: 450" />
+                        </div>
+                        <div class="col-md-2">
+                            <label class="form-label small fw-bold">PIP (cmH2O)</label>
+                            <input type="number" class="form-control" @bind="_request.PeakInspiratoryPressure" placeholder="Örn: 22" />
+                        </div>
+                    </div>
+
+                    <!-- Section 3: Sıvı Dengesi (I&O) -->
+                    <h6 class="fw-bold text-success border-bottom pb-2 mb-3"><i class="bi bi-droplet-half me-1"></i>Sıvı Dengesi (Intake &amp; Output - ml)</h6>
+                    <div class="row g-3 mb-4">
+                        <div class="col-md-3">
+                            <label class="form-label small fw-bold">IV Sıvı Girişi (ml)</label>
+                            <input type="number" class="form-control" @bind="_request.IvFluidIntakeMl" placeholder="Örn: 100" />
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label small fw-bold">Enteral Giriş (ml)</label>
+                            <input type="number" class="form-control" @bind="_request.EnteralNutritionIntakeMl" placeholder="Örn: 50" />
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label small fw-bold">İdrar Çıkışı (ml)</label>
+                            <input type="number" class="form-control" @bind="_request.UrineOutputMl" placeholder="Örn: 80" />
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label small fw-bold">Dren / NG Çıkışı (ml)</label>
+                            <input type="number" class="form-control" @bind="_request.DrainOutputMl" placeholder="Örn: 20" />
+                        </div>
+                    </div>
+
+                    <!-- Section 4: Klinik Notlar -->
+                    <div class="mb-3">
+                        <label class="form-label small fw-bold">Klinik &amp; Hemşire Gözlem Notları</label>
+                        <textarea class="form-control" rows="2" @bind="_request.ClinicalNotes" placeholder="Hasta sedatize, pupiller izokorik, aspirasyonda mukus salgısı..."></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer bg-light">
+                    <button type="button" class="btn btn-secondary" @onclick="() => _showAddModal = false">Vazgeç</button>
+                    <button type="button" class="btn btn-danger" @onclick="SubmitAddEntryAsync" disabled="@_isSubmitting">
+                        @if (_isSubmitting)
+                        {
+                            <span class="spinner-border spinner-border-sm me-1"></span>
+                        }
+                        Gözlemi Kaydet
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter]
+    public Guid AdmissionId { get; set; }
+
+    private bool _isLoading = true;
+    private bool _isSubmitting;
+    private string? _errorMessage;
+    private string? _successMessage;
+
+    private IcuAdmissionResponse? _admission;
+    private List<IcuFlowsheetEntryResponse> _entries = [];
+    private IcuFluidBalanceSummaryResponse? _fluidSummary;
+
+    private bool _showAddModal;
+    private CreateIcuFlowsheetEntryRequest _request = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadDataAsync();
+    }
+
+    private async Task LoadDataAsync()
+    {
+        _isLoading = true;
+        _errorMessage = null;
+        try
+        {
+            _admission = await IcuApi.GetAdmissionByIdAsync(AdmissionId);
+            _entries = await IcuApi.GetFlowsheetEntriesAsync(AdmissionId);
+            _fluidSummary = await IcuApi.GetFluidBalanceSummaryAsync(AdmissionId);
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"Veriler yüklenirken hata: {ex.Message}";
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+    }
+
+    private void OpenAddEntryModal()
+    {
+        _request = new CreateIcuFlowsheetEntryRequest
+        {
+            VentilationMode = _admission?.VentilationMode ?? "NoneSpontaneous",
+            HeartRateBpm = 80,
+            SystolicBpMmHg = 120,
+            DiastolicBpMmHg = 80,
+            RespiratoryRateBpm = 16,
+            OxygenSaturationPct = 98,
+            BodyTemperatureCelsius = 36.8m,
+            GlasgowComaScale = 15,
+            RichmondAgitationSedationScale = 0,
+        };
+        _showAddModal = true;
+    }
+
+    private async Task SubmitAddEntryAsync()
+    {
+        _isSubmitting = true;
+        _errorMessage = null;
+        try
+        {
+            var res = await IcuApi.AddFlowsheetEntryAsync(AdmissionId, _request);
+            if (res != null)
+            {
+                _successMessage = "Saatlik gözlem kaydı başarıyla kaydedildi.";
+                _showAddModal = false;
+                await LoadDataAsync();
+            }
+            else
+            {
+                _errorMessage = "Gözlem kaydedilemedi. Lütfen parametreleri kontrol ediniz.";
+            }
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"Kayıt hatası: {ex.Message}";
+        }
+        finally
+        {
+            _isSubmitting = false;
+        }
+    }
+}

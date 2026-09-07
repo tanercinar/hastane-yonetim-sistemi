@@ -1,0 +1,67 @@
+using HospitalManagement.Modules.SurgeryCriticalCare.Domain;
+
+namespace HospitalManagement.Modules.SurgeryCriticalCare.Application;
+
+public sealed record CreateIcuFlowsheetEntryDto(
+    Guid IcuAdmissionId,
+    DateTime? RecordedAtUtc,
+    int? HeartRateBpm,
+    int? SystolicBpMmHg,
+    int? DiastolicBpMmHg,
+    int? RespiratoryRateBpm,
+    decimal? OxygenSaturationPct,
+    decimal? BodyTemperatureCelsius,
+    int? GlasgowComaScale,
+    int? RichmondAgitationSedationScale,
+    IcuVentilationMode VentilationMode,
+    int? FractionOfInspiredOxygenPct,
+    int? PositiveEndExpiratoryPressure,
+    int? TidalVolumeMl,
+    int? PeakInspiratoryPressure,
+    int? IvFluidIntakeMl,
+    int? EnteralNutritionIntakeMl,
+    int? UrineOutputMl,
+    int? DrainOutputMl,
+    string? ClinicalNotes);
+
+public sealed record IcuFlowsheetEntryDto(
+    Guid Id,
+    Guid IcuAdmissionId,
+    DateTime RecordedAtUtc,
+    Guid RecordedByStaffId,
+    int? HeartRateBpm,
+    int? SystolicBpMmHg,
+    int? DiastolicBpMmHg,
+    int? MeanArterialPressureMmHg,
+    int? RespiratoryRateBpm,
+    decimal? OxygenSaturationPct,
+    decimal? BodyTemperatureCelsius,
+    int? GlasgowComaScale,
+    int? RichmondAgitationSedationScale,
+    IcuVentilationMode VentilationMode,
+    int? FractionOfInspiredOxygenPct,
+    int? PositiveEndExpiratoryPressure,
+    int? TidalVolumeMl,
+    int? PeakInspiratoryPressure,
+    int? IvFluidIntakeMl,
+    int? EnteralNutritionIntakeMl,
+    int? UrineOutputMl,
+    int? DrainOutputMl,
+    int TotalIntakeMl,
+    int TotalOutputMl,
+    int NetFluidBalanceMl,
+    string? ClinicalNotes,
+    DateTime CreatedAtUtc);
+
+public sealed record IcuFluidBalanceSummaryDto(
+    Guid IcuAdmissionId,
+    DateTime FromUtc,
+    DateTime ToUtc,
+    int TotalIvIntakeMl,
+    int TotalEnteralIntakeMl,
+    int TotalIntakeMl,
+    int TotalUrineOutputMl,
+    int TotalDrainOutputMl,
+    int TotalOutputMl,
+    int NetBalanceMl,
+    int EntryCount);

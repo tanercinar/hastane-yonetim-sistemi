@@ -1,0 +1,222 @@
+@page "/patient/diagnostic-results"
+@using HospitalManagement.Contracts.Diagnostics
+@using HospitalManagement.Web.Client.Diagnostics
+@inject IDiagnosticsApiClient DiagnosticsApi
+@inject NavigationManager Navigation
+
+<PageTitle>Tahlil ve Tanı Sonuçlarım - Hasta Portalı</PageTitle>
+
+<div class="container-fluid px-4 py-3">
+    <!-- Header -->
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <div>
+            <h4 class="mb-0 text-primary fw-bold">
+                <i class="bi bi-file-earmark-medical me-2"></i>Tahlil ve Tanı Sonuçlarım
+            </h4>
+            <p class="text-muted small mb-0">Uzman hekim tarafından onaylanmış laboratuvar, radyoloji ve patoloji sonuçlarınız</p>
+        </div>
+        <div>
+            <button class="btn btn-outline-primary btn-sm" @onclick="LoadResultsAsync">
+                <i class="bi bi-arrow-clockwise me-1"></i>Yenile
+            </button>
+        </div>
+    </div>
+
+    <!-- Security & Privacy Notice -->
+    <div class="alert alert-info d-flex align-items-center mb-4 py-2" role="alert">
+        <i class="bi bi-shield-lock-fill flex-shrink-0 me-2 fs-5"></i>
+        <div class="small">
+            <strong>GÜVENLİ HASTA ERİŞİMİ:</strong> Yalnızca adınıza düzenlenmiş ve hekim klinik onayından geçmiş kesinleşmiş raporlar listelenmektedir. İncelemesi devam eden veya taslak kayıtlar yayınlanmaz.
+        </div>
+    </div>
+
+    @if (!string.IsNullOrWhiteSpace(_errorMessage))
+    {
+        <div class="alert alert-danger alert-dismissible fade show" role="alert">
+            <i class="bi bi-exclamation-circle-fill me-2"></i>@_errorMessage
+            <button type="button" class="btn-close" @onclick="() => _errorMessage = null"></button>
+        </div>
+    }
+
+    <!-- Filter Buttons -->
+    <div class="d-flex gap-2 mb-3">
+        <button class="btn btn-sm @(_categoryFilter == null ? "btn-primary" : "btn-outline-secondary")" @onclick="() => SetCategoryFilter(null)">
+            Tümü (@_results.Count)
+        </button>
+        <button class="btn btn-sm @(_categoryFilter == "Laboratory" ? "btn-primary" : "btn-outline-secondary")" @onclick='() => SetCategoryFilter("Laboratory")'>
+            <i class="bi bi-eyedropper me-1"></i>Laboratuvar (@_results.Count(r => r.Category == "Laboratory"))
+        </button>
+        <button class="btn btn-sm @(_categoryFilter == "Radiology" ? "btn-primary" : "btn-outline-secondary")" @onclick='() => SetCategoryFilter("Radiology")'>
+            <i class="bi bi-camera me-1"></i>Radyoloji (@_results.Count(r => r.Category == "Radiology"))
+        </button>
+        <button class="btn btn-sm @(_categoryFilter == "Pathology" ? "btn-primary" : "btn-outline-secondary")" @onclick='() => SetCategoryFilter("Pathology")'>
+            <i class="bi bi-virus me-1"></i>Patoloji (@_results.Count(r => r.Category == "Pathology"))
+        </button>
+    </div>
+
+    @if (_isLoading)
+    {
+        <div class="text-center py-5">
+            <div class="spinner-border text-primary" role="status">
+                <span class="visually-hidden">Yükleniyor...</span>
+            </div>
+            <div class="text-muted mt-2">Sonuçlarınız yükleniyor...</div>
+        </div>
+    }
+    else if (FilteredResults.Count == 0)
+    {
+        <div class="card border-0 shadow-sm text-center py-5">
+            <div class="card-body">
+                <i class="bi bi-inbox text-muted fs-1 mb-2"></i>
+                <h5 class="text-muted">Onaylanmış Sonuç Bulunamadı</h5>
+                <p class="text-muted small mb-0">Seçilen kategoride adınıza yayınlanmış bir kesin rapor henüz bulunmamaktadır.</p>
+            </div>
+        </div>
+    }
+    else
+    {
+        <div class="row g-3">
+            @foreach (var res in FilteredResults)
+            {
+                <div class="col-12">
+                    <div class="card border-0 shadow-sm">
+                        <div class="card-header bg-white d-flex justify-content-between align-items-center py-3">
+                            <div class="d-flex align-items-center gap-2">
+                                <span class="badge @GetCategoryBadgeClass(res.Category)">@GetCategoryName(res.Category)</span>
+                                <h6 class="mb-0 fw-bold text-dark">@res.TestOrStudyName</h6>
+                            </div>
+                            <div class="text-end">
+                                <small class="text-muted d-block">@res.ResultDateUtc.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</small>
+                                <small class="text-primary">@res.DoctorOrDepartment</small>
+                            </div>
+                        </div>
+                        <div class="card-body">
+                            @if (res.IsPendingDoctorReview)
+                            {
+                                <div class="alert alert-warning py-2 mb-3 small d-flex align-items-center">
+                                    <i class="bi bi-info-circle-fill me-2"></i>
+                                    <span><strong>Hekim Değerlendirmesi:</strong> Bazı tetkik değerleriniz hekiminiz tarafından öncelikli olarak değerlendirilmektedir.</span>
+                                </div>
+                            }
+
+                            @if (!string.IsNullOrWhiteSpace(res.FinalReportDiagnosis))
+                            {
+                                <div class="mb-3">
+                                    <label class="form-label text-muted small fw-bold mb-1">Kesin Rapor / Tanı Notu:</label>
+                                    <div class="p-3 bg-light rounded border text-dark">
+                                        @res.FinalReportDiagnosis
+                                    </div>
+                                </div>
+                            }
+
+                            @if (res.Parameters != null && res.Parameters.Count > 0)
+                            {
+                                <div class="table-responsive">
+                                    <table class="table table-sm table-bordered align-middle mb-0">
+                                        <thead class="table-light">
+                                            <tr>
+                                                <th>Parametre</th>
+                                                <th>Sonuç</th>
+                                                <th>Birim</th>
+                                                <th>Referans Aralığı</th>
+                                                <th>Durum</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            @foreach (var p in res.Parameters)
+                                            {
+                                                <tr class="@(p.IsCritical ? "table-danger" : "")">
+                                                    <td class="fw-semibold">@p.Name</td>
+                                                    <td class="fw-bold @(p.IsCritical ? "text-danger" : "")">@p.Value</td>
+                                                    <td>@p.Unit</td>
+                                                    <td><small class="text-muted">@p.ReferenceRange</small></td>
+                                                    <td>
+                                                        @if (p.IsCritical)
+                                                        {
+                                                            <span class="badge bg-danger">Kritik</span>
+                                                        }
+                                                        else if (p.Interpretation == "High")
+                                                        {
+                                                            <span class="badge bg-warning text-dark">Yüksek</span>
+                                                        }
+                                                        else if (p.Interpretation == "Low")
+                                                        {
+                                                            <span class="badge bg-warning text-dark">Düşük</span>
+                                                        }
+                                                        else
+                                                        {
+                                                            <span class="badge bg-success">Normal</span>
+                                                        }
+                                                    </td>
+                                                </tr>
+                                            }
+                                        </tbody>
+                                    </table>
+                                </div>
+                            }
+                        </div>
+                    </div>
+                </div>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    private bool _isLoading = true;
+    private string? _errorMessage;
+    private string? _categoryFilter;
+    private List<PatientPortalResultSummaryResponse> _results = [];
+
+    private List<PatientPortalResultSummaryResponse> FilteredResults =>
+        string.IsNullOrWhiteSpace(_categoryFilter)
+            ? _results
+            : _results.Where(r => r.Category == _categoryFilter).ToList();
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadResultsAsync();
+    }
+
+    private async Task LoadResultsAsync()
+    {
+        _isLoading = true;
+        _errorMessage = null;
+
+        try
+        {
+            _results = await DiagnosticsApi.GetMyPatientPortalResultsAsync();
+        }
+        catch (Exception)
+        {
+            _errorMessage = "Sonuçlar yüklenemedi. Bağlantınızı kontrol edip yeniden deneyin.";
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+    }
+
+    private void SetCategoryFilter(string? cat)
+    {
+        _categoryFilter = cat;
+    }
+
+    private static string GetCategoryName(string cat) => cat switch
+    {
+        "Laboratory" => "Laboratuvar",
+        "Radiology" => "Radyoloji",
+        "Pathology" => "Patoloji",
+        "BloodBank" => "Kan Bankası",
+        _ => cat,
+    };
+
+    private static string GetCategoryBadgeClass(string cat) => cat switch
+    {
+        "Laboratory" => "bg-primary",
+        "Radiology" => "bg-info text-dark",
+        "Pathology" => "bg-purple text-white",
+        "BloodBank" => "bg-danger",
+        _ => "bg-secondary",
+    };
+}

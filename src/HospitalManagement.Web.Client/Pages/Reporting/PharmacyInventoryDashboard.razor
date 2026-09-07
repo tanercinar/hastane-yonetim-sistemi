@@ -1,0 +1,177 @@
+@page "/reporting/pharmacy-inventory"
+@using HospitalManagement.Contracts.Reporting
+@using HospitalManagement.Web.Client.Identity
+@using HospitalManagement.Web.Client.Reporting
+@using Microsoft.AspNetCore.Authorization
+@attribute [Authorize]
+@inject IReportingApiClient ReportingClient
+@inject UserSessionState SessionState
+
+<PageTitle>Eczane ve İlaç Stok Panosu — HMS</PageTitle>
+
+<div class="ui-container" style="max-width: 1200px; margin: 0 auto; padding: 1.5rem 1rem;">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; flex-wrap: wrap; gap: 1rem;">
+        <div>
+            <h1 style="font-size: 1.5rem; font-weight: 700; color: var(--color-text-main); margin: 0;">Eczane ve İlaç Stok Operasyon Panosu</h1>
+            <p style="font-size: 0.875rem; color: var(--color-text-muted); margin: 0.25rem 0 0 0;">
+                Günlük reçete karşılama akışı, kritik stok eşikleri ve miat yaklaşan lot takibi
+            </p>
+        </div>
+        <div style="display: flex; align-items: center; gap: 0.75rem;">
+            <input type="date" class="ui-input" style="width: auto;" @bind="SelectedDate" @bind:after="LoadDashboardAsync" />
+            <button type="button" class="ui-button ui-button--secondary" @onclick="LoadDashboardAsync" disabled="@IsLoading">
+                Yenile
+            </button>
+        </div>
+    </div>
+
+    @if (IsForbidden)
+    {
+        <div class="ui-card" style="padding: 2rem; text-align: center; border-left: 4px solid var(--color-danger);">
+            <h2 style="font-size: 1.125rem; font-weight: 600; color: var(--color-danger); margin: 0 0 0.5rem 0;">Erişim Yetkisi Yok</h2>
+            <p style="color: var(--color-text-muted); margin: 0;">Bu operasyon panosunu görüntülemek için gereken yetkiye sahip değilsiniz.</p>
+        </div>
+    }
+    else if (IsLoading)
+    {
+        <div class="ui-card" style="padding: 3rem; text-align: center;">
+            <div class="ui-spinner" style="margin: 0 auto 1rem auto;"></div>
+            <p style="color: var(--color-text-muted); margin: 0;">Eczane ve stok metrikleri yükleniyor...</p>
+        </div>
+    }
+    else if (!string.IsNullOrEmpty(ErrorMessage))
+    {
+        <div class="ui-card" style="padding: 2rem; text-align: center; border-left: 4px solid var(--color-danger);">
+            <h2 style="font-size: 1.125rem; font-weight: 600; color: var(--color-danger); margin: 0 0 0.5rem 0;">Hata Oluştu</h2>
+            <p style="color: var(--color-text-muted); margin: 0 0 1rem 0;">@ErrorMessage</p>
+            <button type="button" class="ui-button ui-button--primary" @onclick="LoadDashboardAsync">Tekrar Dene</button>
+        </div>
+    }
+    else if (Summary is null || (Summary.TotalPrescriptions == 0 && Summary.LowStockItemCount == 0 && Summary.NearExpiryLotCount == 0))
+    {
+        <div class="ui-card" style="padding: 3rem; text-align: center;">
+            <h2 style="font-size: 1.125rem; font-weight: 600; color: var(--color-text-main); margin: 0 0 0.5rem 0;">Seçili Günde Eczane Hareketi Yok</h2>
+            <p style="color: var(--color-text-muted); margin: 0;">@SelectedDate.ToString("dd.MM.yyyy") tarihi için kayıtlı reçete veya stok alarmı bulunamadı.</p>
+        </div>
+    }
+    else
+    {
+        <!-- KPI Summary Cards -->
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 1rem; margin-bottom: 1.5rem;">
+            <div class="ui-card" style="padding: 1.25rem;">
+                <span style="font-size: 0.75rem; font-weight: 600; color: var(--color-text-muted); text-transform: uppercase;">Toplam Reçete</span>
+                <div style="font-size: 1.75rem; font-weight: 700; color: var(--color-text-main); margin-top: 0.25rem;">@Summary.TotalPrescriptions</div>
+            </div>
+            <div class="ui-card" style="padding: 1.25rem;">
+                <span style="font-size: 0.75rem; font-weight: 600; color: var(--color-warning); text-transform: uppercase;">Bekleyen İlaç Çıkışı</span>
+                <div style="font-size: 1.75rem; font-weight: 700; color: var(--color-warning); margin-top: 0.25rem;">@Summary.PendingDispenseCount</div>
+            </div>
+            <div class="ui-card" style="padding: 1.25rem;">
+                <span style="font-size: 0.75rem; font-weight: 600; color: var(--color-success); text-transform: uppercase;">Teslim Edilen</span>
+                <div style="font-size: 1.75rem; font-weight: 700; color: var(--color-success); margin-top: 0.25rem;">@Summary.DispensedCount</div>
+            </div>
+            <div class="ui-card" style="padding: 1.25rem;">
+                <span style="font-size: 0.75rem; font-weight: 600; color: var(--color-danger); text-transform: uppercase;">Düşük Stok Kalemi</span>
+                <div style="font-size: 1.75rem; font-weight: 700; color: var(--color-danger); margin-top: 0.25rem;">@Summary.LowStockItemCount</div>
+            </div>
+            <div class="ui-card" style="padding: 1.25rem;">
+                <span style="font-size: 0.75rem; font-weight: 600; color: #eab308; text-transform: uppercase;">Miat Yaklaşan Lot</span>
+                <div style="font-size: 1.75rem; font-weight: 700; color: #eab308; margin-top: 0.25rem;">@Summary.NearExpiryLotCount</div>
+            </div>
+        </div>
+
+        <!-- Stock Alerts Table -->
+        @if (StockAlerts.Count > 0)
+        {
+            <div class="ui-card" style="padding: 1.5rem;">
+                <h2 style="font-size: 1.125rem; font-weight: 600; margin: 0 0 0.5rem 0;">Kritik Stok ve Miat Uyarıları</h2>
+                <p style="font-size: 0.875rem; color: var(--color-text-muted); margin: 0 0 1rem 0;">
+                    Yalnızca operasyonel stok miktarı ve asgari güvenlik seviyeleri gösterilmektedir. Finansal veya satınalma tutarları kapsam dışıdır.
+                </p>
+                <div style="overflow-x: auto;">
+                    <table class="ui-table" style="width: 100%;">
+                        <thead>
+                            <tr>
+                                <th>Uyarı Türü</th>
+                                <th>İlaç / Malzeme Tanımı</th>
+                                <th style="text-align: right;">Mevcut Stok</th>
+                                <th style="text-align: right;">Kritik Eşik</th>
+                                <th>Birim</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var alert in StockAlerts)
+                            {
+                                <tr>
+                                    <td>
+                                        @if (alert.AlertType.Contains("Kritik", StringComparison.OrdinalIgnoreCase))
+                                        {
+                                            <span style="background: var(--color-danger-bg); color: var(--color-danger); padding: 0.2rem 0.5rem; border-radius: 4px; font-weight: 600; font-size: 0.8125rem;">
+                                                @alert.AlertType
+                                            </span>
+                                        }
+                                        else
+                                        {
+                                            <span style="background: #fef9c3; color: #854d0e; padding: 0.2rem 0.5rem; border-radius: 4px; font-weight: 600; font-size: 0.8125rem;">
+                                                @alert.AlertType
+                                            </span>
+                                        }
+                                    </td>
+                                    <td style="font-weight: 500;">@alert.ItemName</td>
+                                    <td style="text-align: right; font-weight: 700; color: var(--color-danger);">@alert.CurrentStock</td>
+                                    <td style="text-align: right; color: var(--color-text-muted);">@alert.MinimumThreshold</td>
+                                    <td>@alert.Unit</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        }
+    }
+</div>
+
+@code {
+    private DateOnly SelectedDate { get; set; } = DateOnly.FromDateTime(DateTime.UtcNow);
+    private bool IsLoading { get; set; } = true;
+    private bool IsForbidden { get; set; }
+    private string? ErrorMessage { get; set; }
+
+    private PharmacyDashboardSummaryResponse? Summary { get; set; }
+    private List<PharmacyStockAlertMetricResponse> StockAlerts { get; set; } = [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadDashboardAsync();
+    }
+
+    private async Task LoadDashboardAsync()
+    {
+        IsLoading = true;
+        IsForbidden = false;
+        ErrorMessage = null;
+
+        try
+        {
+            var summaryTask = ReportingClient.GetPharmacyDashboardSummaryAsync(SelectedDate);
+            var alertsTask = ReportingClient.GetPharmacyStockAlertsAsync(SelectedDate);
+
+            await Task.WhenAll(summaryTask, alertsTask);
+
+            Summary = await summaryTask;
+            StockAlerts = await alertsTask;
+        }
+        catch (HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.Forbidden)
+        {
+            IsForbidden = true;
+        }
+        catch (Exception ex)
+        {
+            ErrorMessage = "Metrikler yüklenirken bir sorun oluştu: " + ex.Message;
+        }
+        finally
+        {
+            IsLoading = false;
+        }
+    }
+}

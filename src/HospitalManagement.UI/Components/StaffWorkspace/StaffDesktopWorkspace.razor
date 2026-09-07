@@ -1,0 +1,423 @@
+@using HospitalManagement.UI.Components
+@using HospitalManagement.UI.Services
+@inject IPlatformConnectivityService ConnectivityService
+
+@if (!HasPermission)
+{
+    <ForbiddenState />
+}
+else if (!ConnectivityService.IsConnected)
+{
+    <ConnectionRequiredState />
+}
+else
+{
+    <div class="staff-desktop-workspace container-fluid p-3" @onkeydown="HandleGlobalKeyDown" tabindex="0" aria-label="Personel Masaüstü Çalışma Alanı">
+        <!-- Header Banner & Keyboard Navigation Hint -->
+        <div class="d-flex justify-content-between align-items-center mb-3 pb-2 border-bottom flex-wrap gap-2">
+            <div>
+                <h1 class="h4 mb-0 fw-bold text-primary">Personel Klinik Çalışma Alanı</h1>
+                <small class="text-muted">Klavye Kısayolları: Alt+1 (Randevular), Alt+2 (Hasta Arama), Alt+3 (Muayene), Alt+4 (Bildirimler)</small>
+            </div>
+            <div class="d-flex align-items-center gap-2">
+                <span class="badge bg-secondary">Rol: @StaffRole</span>
+                @if (UnreadAlertCount > 0)
+                {
+                    <span class="badge bg-danger" aria-label="@UnreadAlertCount okunmamış bildirim">
+                        @UnreadAlertCount Bildirim
+                    </span>
+                }
+            </div>
+        </div>
+
+        <!-- Accessible Navigation Tabs -->
+        <ul class="nav nav-tabs mb-3" role="tablist" aria-label="Masaüstü Panelleri">
+            <li class="nav-item" role="presentation">
+                <button type="button"
+                        class="nav-link @(ActiveTab == "appointments" ? "active fw-bold" : "")"
+                        role="tab"
+                        id="tab-appointments"
+                        aria-selected="@(ActiveTab == "appointments" ? "true" : "false")"
+                        aria-controls="panel-appointments"
+                        @onclick='() => SetActiveTab("appointments")'>
+                    Randevu Listesi (Alt+1)
+                </button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button type="button"
+                        class="nav-link @(ActiveTab == "patient-search" ? "active fw-bold" : "")"
+                        role="tab"
+                        id="tab-patient-search"
+                        aria-selected="@(ActiveTab == "patient-search" ? "true" : "false")"
+                        aria-controls="panel-patient-search"
+                        @onclick='() => SetActiveTab("patient-search")'>
+                    Hasta Arama (Alt+2)
+                </button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button type="button"
+                        class="nav-link @(ActiveTab == "encounter" ? "active fw-bold" : "")"
+                        role="tab"
+                        id="tab-encounter"
+                        aria-selected="@(ActiveTab == "encounter" ? "true" : "false")"
+                        aria-controls="panel-encounter"
+                        @onclick='() => SetActiveTab("encounter")'>
+                    Muayene Özeti (Alt+3)
+                </button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button type="button"
+                        class="nav-link @(ActiveTab == "notifications" ? "active fw-bold" : "")"
+                        role="tab"
+                        id="tab-notifications"
+                        aria-selected="@(ActiveTab == "notifications" ? "true" : "false")"
+                        aria-controls="panel-notifications"
+                        @onclick='() => SetActiveTab("notifications")'>
+                    Bildirimler (@UnreadAlertCount) (Alt+4)
+                </button>
+            </li>
+        </ul>
+
+        <!-- Main Workspace Responsive Layout (Master-Detail for Desktop Windows) -->
+        <div class="row g-3">
+            <!-- Left Pane / Active Primary View -->
+            <div class="col-12 col-xl-8">
+                @if (ActiveTab == "appointments")
+                {
+                    <div id="panel-appointments" role="tabpanel" aria-labelledby="tab-appointments" class="card shadow-sm p-3">
+                        <div class="d-flex justify-content-between align-items-center mb-3">
+                            <h2 class="h5 mb-0 fw-bold">Günlük Randevu Listesi</h2>
+                            <span class="badge bg-info text-dark">@Appointments.Count Randevu</span>
+                        </div>
+
+                        @if (Appointments.Count == 0)
+                        {
+                            <EmptyState Title="Randevu Bulunamadı" Description="Bugün için planlanmış randevu bulunmamaktadır." />
+                        }
+                        else
+                        {
+                            <div class="table-responsive">
+                                <table class="table table-hover table-striped align-middle mb-0" aria-label="Randevu Tablosu">
+                                    <thead class="table-light">
+                                        <tr>
+                                            <th scope="col">Saat</th>
+                                            <th scope="col">Hasta (Maskeli)</th>
+                                            <th scope="col">Bölüm / Hekim</th>
+                                            <th scope="col">Durum</th>
+                                            <th scope="col">İşlem</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        @foreach (var apt in Appointments)
+                                        {
+                                            <tr class="@(SelectedAppointmentId == apt.Id ? "table-primary" : "")">
+                                                <td>@apt.AppointmentDate.ToString("HH:mm")</td>
+                                                <td>@apt.PatientNameMasked</td>
+                                                <td>@apt.DepartmentName / @apt.DoctorName</td>
+                                                <td>
+                                                    <span class="badge @GetStatusBadgeClass(apt.Status)">@apt.Status</span>
+                                                </td>
+                                                <td>
+                                                    <button type="button"
+                                                            class="btn btn-sm btn-outline-primary"
+                                                            @onclick="() => SelectAppointment(apt)">
+                                                        Detay
+                                                    </button>
+                                                </td>
+                                            </tr>
+                                        }
+                                    </tbody>
+                                </table>
+                            </div>
+                        }
+                    </div>
+                }
+                else if (ActiveTab == "patient-search")
+                {
+                    <div id="panel-patient-search" role="tabpanel" aria-labelledby="tab-patient-search" class="card shadow-sm p-3">
+                        <h2 class="h5 mb-3 fw-bold">Hasta Arama</h2>
+                        <div class="input-group mb-3">
+                            <input type="text"
+                                   class="form-control"
+                                   placeholder="Hasta Adı veya Protokol No ile Ara... (Enter)"
+                                   @bind="_searchQuery"
+                                   @bind:event="oninput"
+                                   @onkeydown="HandleSearchKeyDown"
+                                   aria-label="Hasta arama sorgusu" />
+                            <button type="button" class="btn btn-primary" @onclick="ExecutePatientSearch">
+                                Ara
+                            </button>
+                        </div>
+
+                        @if (_isSearching)
+                        {
+                            <LoadingState Message="Hastalar aranıyor..." />
+                        }
+                        else if (SearchResults.Count == 0 && !string.IsNullOrWhiteSpace(_searchQuery))
+                        {
+                            <EmptyState Title="Sonuç Yok" Description="Arama kriterlerine uygun hasta bulunamadı." />
+                        }
+                        else
+                        {
+                            <div class="list-group">
+                                @foreach (var p in SearchResults)
+                                {
+                                    <button type="button"
+                                            class="list-group-item list-group-item-action d-flex justify-content-between align-items-center"
+                                            @onclick="() => SelectPatient(p)">
+                                        <div>
+                                            <div class="fw-bold">@p.FullName</div>
+                                            <small class="text-muted">Kimlik: @p.NationalIdMasked | D.Tarihi: @p.BirthDate | Cinsiyet: @p.Gender</small>
+                                        </div>
+                                        <span class="badge bg-secondary">Seç</span>
+                                    </button>
+                                }
+                            </div>
+                        }
+                    </div>
+                }
+                else if (ActiveTab == "encounter")
+                {
+                    <div id="panel-encounter" role="tabpanel" aria-labelledby="tab-encounter" class="card shadow-sm p-3">
+                        <h2 class="h5 mb-3 fw-bold">Muayene Özeti</h2>
+                        @if (CurrentEncounter is null)
+                        {
+                            <EmptyState Title="Muayene Seçilmedi" Description="Görüntülemek için listeden bir randevu veya hasta seçiniz." />
+                        }
+                        else
+                        {
+                            <div class="card border-info mb-3">
+                                <div class="card-header bg-info bg-opacity-10 d-flex justify-content-between">
+                                    <span class="fw-bold">@CurrentEncounter.PatientNameMasked</span>
+                                    <span class="text-muted">@CurrentEncounter.EncounterDate.ToString("dd.MM.yyyy HH:mm")</span>
+                                </div>
+                                <div class="card-body">
+                                    <p class="mb-2"><strong>Bölüm:</strong> @CurrentEncounter.DepartmentName</p>
+                                    <p class="mb-2"><strong>Şikâyet:</strong> @CurrentEncounter.ChiefComplaint</p>
+                                    <p class="mb-2"><strong>Vital Bulgular:</strong> @CurrentEncounter.VitalSignsSummary</p>
+                                    <p class="mb-2"><strong>Tanı:</strong> @CurrentEncounter.Diagnosis</p>
+                                    <p class="mb-0"><strong>Reçete / Tedavi:</strong> @CurrentEncounter.PrescriptionSummary</p>
+                                </div>
+                                <div class="card-footer d-flex justify-content-between align-items-center">
+                                    <span class="badge bg-success">Durum: @CurrentEncounter.Status</span>
+                                    <small class="text-muted">İmzalı klinik kayıt değişmezdir.</small>
+                                </div>
+                            </div>
+                        }
+                    </div>
+                }
+                else if (ActiveTab == "notifications")
+                {
+                    <div id="panel-notifications" role="tabpanel" aria-labelledby="tab-notifications" class="card shadow-sm p-3">
+                        <div class="d-flex justify-content-between align-items-center mb-3">
+                            <h2 class="h5 mb-0 fw-bold">Operasyonel Bildirimler</h2>
+                            <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="MarkAllAlertsAsRead">
+                                Tümünü Okundu İşaretle
+                            </button>
+                        </div>
+
+                        @if (Alerts.Count == 0)
+                        {
+                            <EmptyState Title="Bildirim Yok" Description="Okunmamış operasyonel bildirim bulunmamaktadır." />
+                        }
+                        else
+                        {
+                            <div class="list-group">
+                                @foreach (var alert in Alerts)
+                                {
+                                    <div class="list-group-item @(alert.IsRead ? "opacity-75" : "border-start border-4 border-danger") mb-2">
+                                        <div class="d-flex w-100 justify-content-between">
+                                            <h6 class="mb-1 fw-bold @GetAlertTextClass(alert.Severity)">
+                                                @alert.Title
+                                            </h6>
+                                            <small class="text-muted">@alert.Timestamp.ToString("HH:mm")</small>
+                                        </div>
+                                        <p class="mb-1">@alert.Message</p>
+                                        <div class="d-flex justify-content-end">
+                                            @if (!alert.IsRead)
+                                            {
+                                                <button type="button" class="btn btn-sm btn-link text-decoration-none p-0" @onclick="() => MarkAlertAsRead(alert)">
+                                                    Okundu Yap
+                                                </button>
+                                            }
+                                        </div>
+                                    </div>
+                                }
+                            </div>
+                        }
+                    </div>
+                }
+            </div>
+
+            <!-- Right Pane: Desktop Windows Quick Summary & Context -->
+            <div class="col-12 col-xl-4">
+                <div class="card shadow-sm p-3 mb-3">
+                    <h3 class="h6 fw-bold mb-2">Seçili Hasta Bağlamı</h3>
+                    @if (SelectedPatient is not null)
+                    {
+                        <div class="border rounded p-2 bg-light mb-2">
+                            <div class="fw-bold">@SelectedPatient.FullName</div>
+                            <small class="text-muted d-block">Kimlik: @SelectedPatient.NationalIdMasked</small>
+                            <small class="text-muted d-block">D.Tarihi: @SelectedPatient.BirthDate</small>
+                        </div>
+                    }
+                    else
+                    {
+                        <p class="text-muted small mb-0">Henüz hasta seçilmedi.</p>
+                    }
+                </div>
+
+                <div class="card shadow-sm p-3">
+                    <h3 class="h6 fw-bold mb-2">Kritik Güvenlik İlkeleri</h3>
+                    <ul class="small text-muted mb-0 ps-3">
+                        <li>Klinik kayıtlar sessizce güncellenemez/silinemez.</li>
+                        <li>Hasta kimlik bilgileri minimum veri ilkesine göre maskelenir.</li>
+                        <li>Çevrimdışı işlem yapılmaz; sunucu tek doğruluk kaynağıdır.</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter]
+    public bool HasPermission { get; set; } = true;
+
+    [Parameter]
+    public string StaffRole { get; set; } = "Doctor";
+
+    [Parameter]
+    public List<StaffAppointmentItem> Appointments { get; set; } = new();
+
+    [Parameter]
+    public List<PatientSearchItem> SearchResults { get; set; } = new();
+
+    [Parameter]
+    public List<StaffAlertItem> Alerts { get; set; } = new();
+
+    [Parameter]
+    public EncounterSummaryItem? CurrentEncounter { get; set; }
+
+    [Parameter]
+    public EventCallback<string> OnSearchRequested { get; set; }
+
+    public string ActiveTab { get; private set; } = "appointments";
+    public Guid? SelectedAppointmentId { get; private set; }
+    public PatientSearchItem? SelectedPatient { get; private set; }
+
+    private string _searchQuery = string.Empty;
+    private bool _isSearching;
+
+    public int UnreadAlertCount => Alerts.Count(a => !a.IsRead);
+
+    public void SetActiveTab(string tabName)
+    {
+        ActiveTab = tabName;
+    }
+
+    public void SelectAppointment(StaffAppointmentItem item)
+    {
+        SelectedAppointmentId = item.Id;
+        CurrentEncounter = new EncounterSummaryItem
+        {
+            Id = item.Id,
+            EncounterDate = item.AppointmentDate,
+            PatientNameMasked = item.PatientNameMasked,
+            DepartmentName = item.DepartmentName,
+            ChiefComplaint = "Rutin kontrol ve muayene",
+            VitalSignsSummary = "Ateş: 36.6°C, TA: 120/80 mmHg, Nabız: 74 bpm",
+            Diagnosis = "K02.1 - Dentin çürüğü",
+            PrescriptionSummary = "Parasetamol 500mg tb (1x1)",
+            Status = "İmzalandı"
+        };
+        ActiveTab = "encounter";
+    }
+
+    public void SelectPatient(PatientSearchItem patient)
+    {
+        SelectedPatient = patient;
+    }
+
+    public async Task ExecutePatientSearch()
+    {
+        if (string.IsNullOrWhiteSpace(_searchQuery))
+        {
+            return;
+        }
+
+        _isSearching = true;
+        try
+        {
+            if (OnSearchRequested.HasDelegate)
+            {
+                await OnSearchRequested.InvokeAsync(_searchQuery);
+            }
+        }
+        finally
+        {
+            _isSearching = false;
+        }
+    }
+
+    private async Task HandleSearchKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter")
+        {
+            await ExecutePatientSearch();
+        }
+    }
+
+    private void HandleGlobalKeyDown(KeyboardEventArgs e)
+    {
+        if (e.AltKey)
+        {
+            if (e.Key == "1")
+            {
+                SetActiveTab("appointments");
+            }
+            else if (e.Key == "2")
+            {
+                SetActiveTab("patient-search");
+            }
+            else if (e.Key == "3")
+            {
+                SetActiveTab("encounter");
+            }
+            else if (e.Key == "4")
+            {
+                SetActiveTab("notifications");
+            }
+        }
+    }
+
+    private void MarkAlertAsRead(StaffAlertItem alert)
+    {
+        alert.IsRead = true;
+    }
+
+    private void MarkAllAlertsAsRead()
+    {
+        foreach (var alert in Alerts)
+        {
+            alert.IsRead = true;
+        }
+    }
+
+    private static string GetStatusBadgeClass(string status) => status switch
+    {
+        "Planlandı" => "bg-primary",
+        "Geldi" => "bg-info text-dark",
+        "Muayenede" => "bg-warning text-dark",
+        "Tamamlandı" => "bg-success",
+        "İptal" => "bg-secondary",
+        _ => "bg-light text-dark"
+    };
+
+    private static string GetAlertTextClass(string severity) => severity switch
+    {
+        "Critical" => "text-danger",
+        "Warning" => "text-warning",
+        _ => "text-info"
+    };
+}

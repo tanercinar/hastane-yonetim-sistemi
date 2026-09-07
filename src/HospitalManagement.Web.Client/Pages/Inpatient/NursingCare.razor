@@ -1,0 +1,874 @@
+@page "/inpatient/nursing"
+@using HospitalManagement.Contracts.Inpatient
+@using HospitalManagement.Web.Client.Inpatient
+@inject IInpatientApiClient InpatientApi
+
+<div class="container-fluid py-3">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <div>
+            <h2 class="fw-bold mb-0">Hemşire Gözlem & Bakım Planı</h2>
+            <p class="text-muted mb-0">Periyodik vital bulgular, sıvı dengesi (giriş/çıkış), hemşirelik tanıları ve görev yönetimi.</p>
+        </div>
+        <div class="d-flex gap-2">
+            <button class="btn btn-outline-primary" @onclick="RefreshDataAsync">
+                <i class="bi bi-arrow-clockwise me-1"></i> Yenile
+            </button>
+        </div>
+    </div>
+
+    @if (!string.IsNullOrWhiteSpace(_successMessage))
+    {
+        <div class="alert alert-success alert-dismissible fade show" role="alert">
+            <i class="bi bi-check-circle-fill me-2"></i>@_successMessage
+            <button type="button" class="btn-close" @onclick="() => _successMessage = null"></button>
+        </div>
+    }
+
+    @if (!string.IsNullOrWhiteSpace(_errorMessage))
+    {
+        <div class="alert alert-danger alert-dismissible fade show" role="alert">
+            <i class="bi bi-exclamation-triangle-fill me-2"></i>@_errorMessage
+            <button type="button" class="btn-close" @onclick="() => _errorMessage = null"></button>
+        </div>
+    }
+
+    <!-- Hasta Seçimi Kartı -->
+    <div class="card shadow-sm border-0 mb-4">
+        <div class="card-body">
+            <div class="row g-3 align-items-center">
+                <div class="col-md-6">
+                    <label class="form-label fw-bold">Yatan Hasta Seçiniz:</label>
+                    <select class="form-select form-select-lg" @bind="_selectedAdmissionId" @bind:after="OnAdmissionChangedAsync">
+                        <option value="">-- Lütfen Hasta Seçiniz --</option>
+                        @foreach (var adm in _activeAdmissions)
+                        {
+                            <option value="@adm.Id">@adm.AdmissionNumber - Hasta: @adm.PatientId.ToString().Substring(0, 8) (@adm.WardName / Yatak: @adm.BedNumber)</option>
+                        }
+                    </select>
+                </div>
+                <div class="col-md-6 text-md-end">
+                    @if (!string.IsNullOrWhiteSpace(_selectedAdmissionId))
+                    {
+                        <div class="d-flex gap-2 justify-content-md-end mt-3 mt-md-0">
+                            <button class="btn btn-primary" @onclick="OpenNewObservationModal">
+                                <i class="bi bi-heart-pulse me-1"></i> Vital & Gözlem Gir
+                            </button>
+                            <button class="btn btn-success" @onclick="OpenNewCarePlanModal">
+                                <i class="bi bi-journal-plus me-1"></i> Bakım Planı Ekle
+                            </button>
+                        </div>
+                    }
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Sekmeler -->
+    <ul class="nav nav-pills mb-4">
+        <li class="nav-item">
+            <button class="nav-link @(_activeTab == "vitals" ? "active" : "")" @onclick='() => _activeTab = "vitals"'>
+                <i class="bi bi-activity me-1"></i> Vital Bulgular & Sıvı Dengesi (@_observations.Count)
+            </button>
+        </li>
+        <li class="nav-item">
+            <button class="nav-link @(_activeTab == "careplans" ? "active" : "")" @onclick='() => _activeTab = "careplans"'>
+                <i class="bi bi-clipboard2-pulse me-1"></i> Bakım Planları & Görevler (@_carePlans.Count)
+            </button>
+        </li>
+        <li class="nav-item">
+            <button class="nav-link @(_activeTab == "overdue" ? "active" : "")" @onclick='() => _activeTab = "overdue"'>
+                <i class="bi bi-alarm me-1"></i> Geciken Görevler
+                @if (_overdueTasks.Count > 0)
+                {
+                    <span class="badge bg-danger ms-1">@_overdueTasks.Count</span>
+                }
+            </button>
+        </li>
+    </ul>
+
+    @if (_isLoading)
+    {
+        <div class="text-center py-5">
+            <div class="spinner-border text-primary" role="status">
+                <span class="visually-hidden">Yükleniyor...</span>
+            </div>
+            <p class="text-muted mt-2">Hemşirelik kayıtları alınıyor...</p>
+        </div>
+    }
+    else if (string.IsNullOrWhiteSpace(_selectedAdmissionId) && _activeTab != "overdue")
+    {
+        <div class="alert alert-info">Lütfen gözlem ve bakım kayıtlarını görüntülemek için yukarıdan bir yatan hasta seçiniz.</div>
+    }
+    else
+    {
+        @if (_activeTab == "vitals")
+        {
+            @if (_observations.Count == 0)
+            {
+                <div class="alert alert-warning">Bu hasta için henüz kaydedilmiş bir vital gözlem bulunmamaktadır.</div>
+            }
+            else
+            {
+                <div class="card shadow-sm border-0">
+                    <div class="table-responsive">
+                        <table class="table table-hover align-middle mb-0">
+                            <thead class="table-light">
+                                <tr>
+                                    <th>Gözlem Zamanı</th>
+                                    <th>Tansiyon</th>
+                                    <th>Nabız</th>
+                                    <th>Solunum</th>
+                                    <th>Ateş</th>
+                                    <th>SpO2</th>
+                                    <th>Ağrı</th>
+                                    <th>Bilinç</th>
+                                    <th>Giriş / Çıkış</th>
+                                    <th>Notlar</th>
+                                    <th class="text-end">İşlem</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var obs in _observations)
+                                {
+                                    <tr class="@(obs.IsCorrection ? "table-warning" : "")">
+                                        <td>
+                                            <div class="fw-bold">@obs.ObservedAtUtc.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</div>
+                                            @if (obs.IsCorrection)
+                                            {
+                                                <span class="badge bg-warning text-dark"><i class="bi bi-pencil-square me-1"></i>Düzeltme</span>
+                                            }
+                                        </td>
+                                        <td>@(obs.SystolicBp.HasValue && obs.DiastolicBp.HasValue ? $"{obs.SystolicBp}/{obs.DiastolicBp} mmHg" : "-")</td>
+                                        <td>@(obs.HeartRate.HasValue ? $"{obs.HeartRate} bpm" : "-")</td>
+                                        <td>@(obs.RespiratoryRate.HasValue ? $"{obs.RespiratoryRate} /dk" : "-")</td>
+                                        <td>@(obs.BodyTemperatureCelsius.HasValue ? $"{obs.BodyTemperatureCelsius:F1} °C" : "-")</td>
+                                        <td>@(obs.OxygenSaturationPercent.HasValue ? $"%{obs.OxygenSaturationPercent}" : "-")</td>
+                                        <td>@(obs.PainScale.HasValue ? $"{obs.PainScale}/10" : "-")</td>
+                                        <td><span class="badge bg-secondary">@obs.Consciousness</span></td>
+                                        <td>
+                                            <small class="d-block text-success">Giriş: @((obs.OralIntakeMl ?? 0) + (obs.IvIntakeMl ?? 0)) mL</small>
+                                            <small class="d-block text-danger">Çıkış: @((obs.UrineOutputMl ?? 0) + (obs.DrainOutputMl ?? 0) + (obs.OtherOutputMl ?? 0)) mL</small>
+                                        </td>
+                                        <td>
+                                            <small class="text-muted">@obs.ClinicalNotes</small>
+                                            @if (!string.IsNullOrWhiteSpace(obs.CorrectionReason))
+                                            {
+                                                <small class="text-danger d-block"><strong>Düzeltme Nedeni:</strong> @obs.CorrectionReason</small>
+                                            }
+                                        </td>
+                                        <td class="text-end">
+                                            <button class="btn btn-outline-secondary btn-sm" @onclick="() => OpenCorrectionModal(obs)" title="Gözlem Düzeltme Kaydı Ekle">
+                                                <i class="bi bi-pencil"></i>
+                                            </button>
+                                        </td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            }
+        }
+        else if (_activeTab == "careplans")
+        {
+            @if (_carePlans.Count == 0)
+            {
+                <div class="alert alert-warning">Bu hasta için henüz tanımlanmış bir hemşirelik bakım planı bulunmamaktadır.</div>
+            }
+            else
+            {
+                <div class="d-flex flex-column gap-4">
+                    @foreach (var plan in _carePlans)
+                    {
+                        <div class="card shadow-sm border-0">
+                            <div class="card-header bg-light d-flex justify-content-between align-items-center">
+                                <div>
+                                    <h5 class="fw-bold text-primary mb-0"><i class="bi bi-clipboard2-pulse me-2"></i>@plan.NursingDiagnosis</h5>
+                                    <small class="text-muted"><strong>Hedef:</strong> @plan.Goal</small>
+                                </div>
+                                <div class="d-flex gap-2 align-items-center">
+                                    <span class="badge bg-success">@plan.Status</span>
+                                    <button class="btn btn-sm btn-outline-primary" @onclick="() => OpenAddTaskModal(plan)">
+                                        <i class="bi bi-plus-circle me-1"></i> Görev Ekle
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="card-body p-0">
+                                @if (plan.Tasks.Count == 0)
+                                {
+                                    <div class="p-3 text-muted">Bu plana ait henüz bir görev bulunmuyor.</div>
+                                }
+                                else
+                                {
+                                    <div class="table-responsive">
+                                        <table class="table table-hover align-middle mb-0">
+                                            <thead class="table-light">
+                                                <tr>
+                                                    <th>Görev Başlığı</th>
+                                                    <th>Sıklık</th>
+                                                    <th>Planlanan Zaman</th>
+                                                    <th>Durum</th>
+                                                    <th>Tamamlanma Notu</th>
+                                                    <th class="text-end">İşlem</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                @foreach (var task in plan.Tasks)
+                                                {
+                                                    <tr>
+                                                        <td class="fw-bold">@task.Title</td>
+                                                        <td><span class="badge bg-light text-dark border">@task.Frequency</span></td>
+                                                        <td>@task.DueTimeUtc.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</td>
+                                                        <td>
+                                                            @if (task.Status == "Completed")
+                                                            {
+                                                                <span class="badge bg-success"><i class="bi bi-check-circle me-1"></i>Tamamlandı</span>
+                                                            }
+                                                            else if (task.Status == "Overdue")
+                                                            {
+                                                                <span class="badge bg-danger"><i class="bi bi-alarm me-1"></i>Gecikmiş</span>
+                                                            }
+                                                            else if (task.Status == "Cancelled")
+                                                            {
+                                                                <span class="badge bg-secondary">İptal Edildi</span>
+                                                            }
+                                                            else
+                                                            {
+                                                                <span class="badge bg-warning text-dark"><i class="bi bi-hourglass-split me-1"></i>Bekliyor</span>
+                                                            }
+                                                        </td>
+                                                        <td><small class="text-muted">@task.CompletionNotes</small></td>
+                                                        <td class="text-end">
+                                                            @if (task.Status == "Pending" || task.Status == "Overdue")
+                                                            {
+                                                                <div class="btn-group btn-group-sm">
+                                                                    <button class="btn btn-outline-success" @onclick="() => OpenCompleteTaskModal(task)">
+                                                                        <i class="bi bi-check-lg me-1"></i> Tamamla
+                                                                    </button>
+                                                                    <button class="btn btn-outline-danger" @onclick="() => OpenCancelTaskModal(task)">
+                                                                        <i class="bi bi-x me-1"></i> İptal
+                                                                    </button>
+                                                                </div>
+                                                            }
+                                                        </td>
+                                                    </tr>
+                                                }
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                }
+                            </div>
+                        </div>
+                    }
+                </div>
+            }
+        }
+        else if (_activeTab == "overdue")
+        {
+            @if (_overdueTasks.Count == 0)
+            {
+                <div class="alert alert-success"><i class="bi bi-check-circle-fill me-2"></i>Gecikmiş herhangi bir hemşirelik görevi bulunmamaktadır.</div>
+            }
+            else
+            {
+                <div class="card shadow-sm border-0 border-start border-4 border-danger">
+                    <div class="card-header bg-white">
+                        <h5 class="text-danger fw-bold mb-0"><i class="bi bi-exclamation-triangle-fill me-2"></i>Geciken Bakım Görevleri</h5>
+                    </div>
+                    <div class="table-responsive">
+                        <table class="table table-hover align-middle mb-0">
+                            <thead class="table-light">
+                                <tr>
+                                    <th>Görev</th>
+                                    <th>Sıklık</th>
+                                    <th>Planlanan Vakit</th>
+                                    <th>Gecikme</th>
+                                    <th class="text-end">İşlem</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var ot in _overdueTasks)
+                                {
+                                    <tr>
+                                        <td class="fw-bold">@ot.Title</td>
+                                        <td><span class="badge bg-secondary">@ot.Frequency</span></td>
+                                        <td>@ot.DueTimeUtc.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</td>
+                                        <td><span class="badge bg-danger">Gecikmiş</span></td>
+                                        <td class="text-end">
+                                            <button class="btn btn-success btn-sm" @onclick="() => OpenCompleteTaskModal(ot)">
+                                                <i class="bi bi-check2-circle me-1"></i> Hemen Tamamla
+                                            </button>
+                                        </td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            }
+        }
+    }
+</div>
+
+<!-- Modal: Yeni Vital & Gözlem -->
+@if (_showNewObservationModal)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal-dialog modal-lg modal-dialog-centered">
+            <div class="modal-content border-0 shadow">
+                <div class="modal-header bg-primary text-white">
+                    <h5 class="modal-title"><i class="bi bi-heart-pulse me-2"></i>Yeni Vital & Hemşire Gözlemi Girişi</h5>
+                    <button type="button" class="btn-close btn-close-white" @onclick="() => _showNewObservationModal = false"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <label class="form-label fw-semibold">Sistolik KB (mmHg):</label>
+                            <input type="number" class="form-control" @bind="_newSystolicBp" placeholder="Örn: 120" />
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label fw-semibold">Diyastolik KB (mmHg):</label>
+                            <input type="number" class="form-control" @bind="_newDiastolicBp" placeholder="Örn: 80" />
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label fw-semibold">Nabız (bpm):</label>
+                            <input type="number" class="form-control" @bind="_newHeartRate" placeholder="Örn: 75" />
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label fw-semibold">Solunum (/dk):</label>
+                            <input type="number" class="form-control" @bind="_newRespiratoryRate" placeholder="Örn: 16" />
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label fw-semibold">Vücut Sıcaklığı (°C):</label>
+                            <input type="number" step="0.1" class="form-control" @bind="_newBodyTemp" placeholder="Örn: 36.8" />
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label fw-semibold">SpO2 (%):</label>
+                            <input type="number" class="form-control" @bind="_newSpO2" placeholder="Örn: 98" />
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label fw-semibold">Ağrı Skalası (0-10):</label>
+                            <input type="number" min="0" max="10" class="form-control" @bind="_newPainScale" placeholder="Örn: 2" />
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label fw-semibold">Bilinç Durumu (AVPU):</label>
+                            <select class="form-select" @bind="_newConsciousness">
+                                <option value="Alert">Alert (Açık)</option>
+                                <option value="Voice">Voice (Sözlü Uyarana Yanıt)</option>
+                                <option value="Pain">Pain (Ağrılı Uyarana Yanıt)</option>
+                                <option value="Unresponsive">Unresponsive (Yanıtsız)</option>
+                            </select>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label fw-semibold">Oral Giriş (mL):</label>
+                            <input type="number" class="form-control" @bind="_newOralIntake" placeholder="Örn: 250" />
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label fw-semibold">IV Giriş (mL):</label>
+                            <input type="number" class="form-control" @bind="_newIvIntake" placeholder="Örn: 500" />
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label fw-semibold">İdrar Çıkışı (mL):</label>
+                            <input type="number" class="form-control" @bind="_newUrineOutput" placeholder="Örn: 400" />
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label fw-semibold">Dren Çıkışı (mL):</label>
+                            <input type="number" class="form-control" @bind="_newDrainOutput" placeholder="Örn: 50" />
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label fw-semibold">Klinik Hemşirelik Notu:</label>
+                            <textarea class="form-control" rows="2" @bind="_newClinicalNotes" placeholder="Hasta rahat, vital bulguları stabil..."></textarea>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" @onclick="() => _showNewObservationModal = false">Vazgeç</button>
+                    <button type="button" class="btn btn-primary" @onclick="SubmitNewObservationAsync">
+                        <i class="bi bi-save me-1"></i> Kaydet
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+<!-- Modal: Gözlem Düzeltme -->
+@if (_showCorrectionModal && _selectedObservationForCorrection != null)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal-dialog modal-lg modal-dialog-centered">
+            <div class="modal-content border-0 shadow">
+                <div class="modal-header bg-warning text-dark">
+                    <h5 class="modal-title"><i class="bi bi-pencil-square me-2"></i>Klinik Gözlem Düzeltme Kaydı</h5>
+                    <button type="button" class="btn-close" @onclick="() => _showCorrectionModal = false"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="alert alert-warning border mb-3">
+                        <i class="bi bi-info-circle me-1"></i>
+                        Klinik kayıtlar doğrudan silinemez. Düzeltme işlemi denetim izine (audit) gerekçesiyle birlikte yeni bir revizyon olarak kaydedilir.
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-bold text-danger">Düzeltme Gerekçesi (Zorunlu):</label>
+                        <textarea class="form-control" rows="2" @bind="_correctionReason" placeholder="Tansiyon değeri yanlış tuşlandı, tekrar ölçülen değer girildi..."></textarea>
+                    </div>
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <label class="form-label fw-semibold">Düzeltilmiş Sistolik KB:</label>
+                            <input type="number" class="form-control" @bind="_corrSystolicBp" />
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label fw-semibold">Düzeltilmiş Diyastolik KB:</label>
+                            <input type="number" class="form-control" @bind="_corrDiastolicBp" />
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label fw-semibold">Düzeltilmiş Nabız:</label>
+                            <input type="number" class="form-control" @bind="_corrHeartRate" />
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label fw-semibold">Düzeltilmiş Ateş:</label>
+                            <input type="number" step="0.1" class="form-control" @bind="_corrBodyTemp" />
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" @onclick="() => _showCorrectionModal = false">Vazgeç</button>
+                    <button type="button" class="btn btn-warning" @onclick="SubmitCorrectionAsync">
+                        <i class="bi bi-check-lg me-1"></i> Düzeltmeyi Kaydet
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+<!-- Modal: Yeni Bakım Planı -->
+@if (_showNewCarePlanModal)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content border-0 shadow">
+                <div class="modal-header bg-success text-white">
+                    <h5 class="modal-title"><i class="bi bi-journal-plus me-2"></i>Yeni Hemşirelik Bakım Planı</h5>
+                    <button type="button" class="btn-close btn-close-white" @onclick="() => _showNewCarePlanModal = false"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">Hemşirelik Tanısı / Bakım Problemi:</label>
+                        <select class="form-select mb-2" @bind="_newNursingDiagnosis">
+                            <option value="Düşme Riski">Düşme Riski</option>
+                            <option value="Doku Bütünlüğünde Bozulma Riski (Bası Yarası)">Doku Bütünlüğünde Bozulma Riski (Bası Yarası)</option>
+                            <option value="Sıvı Volüm Fazlalığı / Ödem">Sıvı Volüm Fazlalığı / Ödem</option>
+                            <option value="Akut Ağrı Yönetimi">Akut Ağrı Yönetimi</option>
+                            <option value="Enfeksiyon Riski">Enfeksiyon Riski</option>
+                            <option value="Hareketsizlik ve Tromboemboli Riski">Hareketsizlik ve Tromboemboli Riski</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">Bakım Hedefi:</label>
+                        <textarea class="form-control" rows="2" @bind="_newCarePlanGoal" placeholder="Hasta yatış süresince düşme yaşamayacak..."></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" @onclick="() => _showNewCarePlanModal = false">Vazgeç</button>
+                    <button type="button" class="btn btn-success" @onclick="SubmitNewCarePlanAsync">
+                        <i class="bi bi-plus-lg me-1"></i> Planı Oluştur
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+<!-- Modal: Bakım Planına Görev Ekle -->
+@if (_showAddTaskModal && _selectedCarePlanForTask != null)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content border-0 shadow">
+                <div class="modal-header bg-primary text-white">
+                    <h5 class="modal-title"><i class="bi bi-plus-circle me-2"></i>Bakım Görevi Ekle</h5>
+                    <button type="button" class="btn-close btn-close-white" @onclick="() => _showAddTaskModal = false"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">Görev Başlığı:</label>
+                        <input type="text" class="form-control" @bind="_newTaskTitle" placeholder="Örn: 2 saatte bir pozisyon değişimi" />
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">Uygulama Sıklığı:</label>
+                        <select class="form-select" @bind="_newTaskFrequency">
+                            <option value="Q2H">2 Saatte Bir (Q2H)</option>
+                            <option value="Q4H">4 Saatte Bir (Q4H)</option>
+                            <option value="Q8H">8 Saatte Bir (Q8H)</option>
+                            <option value="Daily">Günde Bir (Daily)</option>
+                            <option value="PRN">İhtiyaç Halinde (PRN)</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" @onclick="() => _showAddTaskModal = false">Vazgeç</button>
+                    <button type="button" class="btn btn-primary" @onclick="SubmitNewTaskAsync">
+                        <i class="bi bi-plus-lg me-1"></i> Görevi Ekle
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+<!-- Modal: Görevi Tamamla -->
+@if (_showCompleteTaskModal && _selectedTaskForAction != null)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content border-0 shadow">
+                <div class="modal-header bg-success text-white">
+                    <h5 class="modal-title"><i class="bi bi-check2-circle me-2"></i>Bakım Görevini Tamamla</h5>
+                    <button type="button" class="btn-close btn-close-white" @onclick="() => _showCompleteTaskModal = false"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="alert alert-light border mb-3">
+                        <strong>Görev:</strong> @_selectedTaskForAction.Title (@_selectedTaskForAction.Frequency)
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">Tamamlanma Notu:</label>
+                        <textarea class="form-control" rows="2" @bind="_taskCompletionNotes" placeholder="Uygulandı, hasta tolere etti..."></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" @onclick="() => _showCompleteTaskModal = false">Vazgeç</button>
+                    <button type="button" class="btn btn-success" @onclick="SubmitCompleteTaskAsync">
+                        <i class="bi bi-check-lg me-1"></i> Tamamlandı Olarak Kaydet
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+<!-- Modal: Görevi İptal Et -->
+@if (_showCancelTaskModal && _selectedTaskForAction != null)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content border-0 shadow">
+                <div class="modal-header bg-danger text-white">
+                    <h5 class="modal-title"><i class="bi bi-x-circle me-2"></i>Bakım Görevini İptal Et</h5>
+                    <button type="button" class="btn-close btn-close-white" @onclick="() => _showCancelTaskModal = false"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="alert alert-light border mb-3">
+                        <strong>Görev:</strong> @_selectedTaskForAction.Title
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">İptal Gerekçesi:</label>
+                        <textarea class="form-control" rows="2" @bind="_taskCancellationReason" placeholder="Hasta taburculuk aşamasında olduğundan gerek kalmadı..."></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" @onclick="() => _showCancelTaskModal = false">Vazgeç</button>
+                    <button type="button" class="btn btn-danger" @onclick="SubmitCancelTaskAsync">
+                        <i class="bi bi-x-circle me-1"></i> İptali Onayla
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private bool _isLoading = true;
+    private string? _successMessage;
+    private string? _errorMessage;
+
+    private string _activeTab = "vitals";
+    private string _selectedAdmissionId = "";
+    private List<AdmissionSummaryResponse> _activeAdmissions = [];
+    private List<NursingObservationResponse> _observations = [];
+    private List<NursingCarePlanResponse> _carePlans = [];
+    private List<NursingCareTaskResponse> _overdueTasks = [];
+
+    // Modal: Yeni Vital
+    private bool _showNewObservationModal;
+    private int? _newSystolicBp = 120;
+    private int? _newDiastolicBp = 80;
+    private int? _newHeartRate = 72;
+    private int? _newRespiratoryRate = 16;
+    private decimal? _newBodyTemp = 36.6m;
+    private int? _newSpO2 = 98;
+    private int? _newPainScale = 0;
+    private string _newConsciousness = "Alert";
+    private int? _newOralIntake = 200;
+    private int? _newIvIntake = 500;
+    private int? _newUrineOutput = 350;
+    private int? _newDrainOutput = 0;
+    private string _newClinicalNotes = "";
+
+    // Modal: Gözlem Düzeltme
+    private bool _showCorrectionModal;
+    private NursingObservationResponse? _selectedObservationForCorrection;
+    private string _correctionReason = "Tansiyon değeri tekrar ölçüldü ve düzeltildi.";
+    private int? _corrSystolicBp;
+    private int? _corrDiastolicBp;
+    private int? _corrHeartRate;
+    private decimal? _corrBodyTemp;
+
+    // Modal: Yeni Bakım Planı
+    private bool _showNewCarePlanModal;
+    private string _newNursingDiagnosis = "Düşme Riski";
+    private string _newCarePlanGoal = "Hasta yatış süresince düşme yaşamayacak.";
+
+    // Modal: Görev Ekle
+    private bool _showAddTaskModal;
+    private NursingCarePlanResponse? _selectedCarePlanForTask;
+    private string _newTaskTitle = "Yatak kenarlıkları kaldırılacak ve çağrı zili erişilebilir tutulacak.";
+    private string _newTaskFrequency = "Q4H";
+
+    // Modal: Görev Tamamla
+    private bool _showCompleteTaskModal;
+    private NursingCareTaskResponse? _selectedTaskForAction;
+    private string _taskCompletionNotes = "Uygulandı, hasta güvende.";
+
+    // Modal: Görev İptal
+    private bool _showCancelTaskModal;
+    private string _taskCancellationReason = "Gereksinim kalmadı.";
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadActiveAdmissionsAsync();
+        await RefreshDataAsync();
+    }
+
+    private async Task LoadActiveAdmissionsAsync()
+    {
+        try
+        {
+            _activeAdmissions = await InpatientApi.GetAdmissionsAsync(status: "Admitted");
+            if (_activeAdmissions.Count > 0 && string.IsNullOrWhiteSpace(_selectedAdmissionId))
+            {
+                _selectedAdmissionId = _activeAdmissions[0].Id.ToString();
+            }
+        }
+        catch
+        {
+            _activeAdmissions = [];
+        }
+    }
+
+    private async Task OnAdmissionChangedAsync()
+    {
+        await RefreshDataAsync();
+    }
+
+    private async Task RefreshDataAsync()
+    {
+        _isLoading = true;
+        _errorMessage = null;
+        try
+        {
+            if (Guid.TryParse(_selectedAdmissionId, out var admId))
+            {
+                _observations = await InpatientApi.GetObservationsByAdmissionIdAsync(admId);
+                _carePlans = await InpatientApi.GetCarePlansByAdmissionIdAsync(admId);
+            }
+            else
+            {
+                _observations = [];
+                _carePlans = [];
+            }
+
+            _overdueTasks = await InpatientApi.GetOverdueTasksAsync();
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"Veriler yüklenirken hata: {ex.Message}";
+        }
+        finally
+        {
+            _isLoading = false;
+            StateHasChanged();
+        }
+    }
+
+    private void OpenNewObservationModal()
+    {
+        _showNewObservationModal = true;
+    }
+
+    private async Task SubmitNewObservationAsync()
+    {
+        if (!Guid.TryParse(_selectedAdmissionId, out var admId)) return;
+
+        var req = new RecordObservationRequest
+        {
+            AdmissionId = admId,
+            SystolicBp = _newSystolicBp,
+            DiastolicBp = _newDiastolicBp,
+            HeartRate = _newHeartRate,
+            RespiratoryRate = _newRespiratoryRate,
+            BodyTemperatureCelsius = _newBodyTemp,
+            OxygenSaturationPercent = _newSpO2,
+            PainScale = _newPainScale,
+            OralIntakeMl = _newOralIntake,
+            IvIntakeMl = _newIvIntake,
+            UrineOutputMl = _newUrineOutput,
+            DrainOutputMl = _newDrainOutput,
+            Consciousness = _newConsciousness,
+            ClinicalNotes = _newClinicalNotes,
+        };
+
+        var result = await InpatientApi.RecordObservationAsync(req);
+        if (result != null)
+        {
+            _showNewObservationModal = false;
+            _successMessage = "Vital bulgular ve gözlem başarıyla kaydedildi.";
+            await RefreshDataAsync();
+        }
+        else
+        {
+            _errorMessage = "Gözlem kaydı oluşturulamadı.";
+        }
+    }
+
+    private void OpenCorrectionModal(NursingObservationResponse obs)
+    {
+        _selectedObservationForCorrection = obs;
+        _corrSystolicBp = obs.SystolicBp;
+        _corrDiastolicBp = obs.DiastolicBp;
+        _corrHeartRate = obs.HeartRate;
+        _corrBodyTemp = obs.BodyTemperatureCelsius;
+        _showCorrectionModal = true;
+    }
+
+    private async Task SubmitCorrectionAsync()
+    {
+        if (_selectedObservationForCorrection == null) return;
+
+        var req = new CorrectObservationRequest
+        {
+            CorrectionReason = _correctionReason,
+            SystolicBp = _corrSystolicBp,
+            DiastolicBp = _corrDiastolicBp,
+            HeartRate = _corrHeartRate,
+            BodyTemperatureCelsius = _corrBodyTemp,
+            Consciousness = _selectedObservationForCorrection.Consciousness,
+        };
+
+        var result = await InpatientApi.RecordObservationCorrectionAsync(_selectedObservationForCorrection.Id, req);
+        if (result != null)
+        {
+            _showCorrectionModal = false;
+            _successMessage = "Gözlem düzeltme kaydı başarıyla eklendi.";
+            await RefreshDataAsync();
+        }
+        else
+        {
+            _errorMessage = "Gözlem düzeltme işlemi başarısız oldu.";
+        }
+    }
+
+    private void OpenNewCarePlanModal()
+    {
+        _showNewCarePlanModal = true;
+    }
+
+    private async Task SubmitNewCarePlanAsync()
+    {
+        if (!Guid.TryParse(_selectedAdmissionId, out var admId)) return;
+
+        var req = new CreateCarePlanRequest
+        {
+            AdmissionId = admId,
+            NursingDiagnosis = _newNursingDiagnosis,
+            Goal = _newCarePlanGoal,
+        };
+
+        var result = await InpatientApi.CreateCarePlanAsync(req);
+        if (result != null)
+        {
+            _showNewCarePlanModal = false;
+            _successMessage = "Bakım planı başarıyla oluşturuldu.";
+            await RefreshDataAsync();
+        }
+        else
+        {
+            _errorMessage = "Bakım planı oluşturulamadı.";
+        }
+    }
+
+    private void OpenAddTaskModal(NursingCarePlanResponse plan)
+    {
+        _selectedCarePlanForTask = plan;
+        _showAddTaskModal = true;
+    }
+
+    private async Task SubmitNewTaskAsync()
+    {
+        if (_selectedCarePlanForTask == null) return;
+
+        var req = new AddCareTaskRequest
+        {
+            Title = _newTaskTitle,
+            Frequency = _newTaskFrequency,
+            DueTimeUtc = DateTime.UtcNow.AddHours(4),
+        };
+
+        var result = await InpatientApi.AddTaskToCarePlanAsync(_selectedCarePlanForTask.Id, req);
+        if (result != null)
+        {
+            _showAddTaskModal = false;
+            _successMessage = "Bakım görevi başarıyla eklendi.";
+            await RefreshDataAsync();
+        }
+        else
+        {
+            _errorMessage = "Bakım görevi eklenemedi.";
+        }
+    }
+
+    private void OpenCompleteTaskModal(NursingCareTaskResponse task)
+    {
+        _selectedTaskForAction = task;
+        _showCompleteTaskModal = true;
+    }
+
+    private async Task SubmitCompleteTaskAsync()
+    {
+        if (_selectedTaskForAction == null) return;
+
+        var result = await InpatientApi.CompleteCareTaskAsync(_selectedTaskForAction.Id, new CompleteCareTaskRequest { Notes = _taskCompletionNotes });
+        if (result != null)
+        {
+            _showCompleteTaskModal = false;
+            _successMessage = "Bakım görevi tamamlandı.";
+            await RefreshDataAsync();
+        }
+        else
+        {
+            _errorMessage = "Görev tamamlama işlemi başarısız oldu.";
+        }
+    }
+
+    private void OpenCancelTaskModal(NursingCareTaskResponse task)
+    {
+        _selectedTaskForAction = task;
+        _showCancelTaskModal = true;
+    }
+
+    private async Task SubmitCancelTaskAsync()
+    {
+        if (_selectedTaskForAction == null) return;
+
+        var result = await InpatientApi.CancelCareTaskAsync(_selectedTaskForAction.Id, new CancelCareTaskRequest { Reason = _taskCancellationReason });
+        if (result != null)
+        {
+            _showCancelTaskModal = false;
+            _successMessage = "Bakım görevi iptal edildi.";
+            await RefreshDataAsync();
+        }
+        else
+        {
+            _errorMessage = "Görev iptal işlemi başarısız oldu.";
+        }
+    }
+}

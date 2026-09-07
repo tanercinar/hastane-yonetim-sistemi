@@ -1,0 +1,27 @@
+@page "/error"
+@using System.Diagnostics
+
+<PageTitle>Hata</PageTitle>
+
+<h1>İstek tamamlanamadı</h1>
+<p>Beklenmeyen bir hata oluştu.</p>
+
+@if (ShowRequestId)
+{
+    <p><strong>İstek kimliği:</strong> <code>@RequestId</code></p>
+}
+
+@code {
+    [CascadingParameter]
+    private HttpContext? HttpContext { get; set; }
+
+    private string? RequestId { get; set; }
+
+    private bool ShowRequestId => !string.IsNullOrEmpty(RequestId);
+
+    protected override void OnInitialized()
+    {
+        RequestId = Activity.Current?.Id ?? HttpContext?.TraceIdentifier;
+    }
+}
+

@@ -1,0 +1,28 @@
+@inject IStringLocalizer<SharedResources> Localizer
+
+<UiStatePanel Title="@(Title ?? Localizer["EmptyStateTitle"])"
+              Description="@(Description ?? Localizer["EmptyStateDescription"])"
+              Tone="empty"
+              Role="status"
+              AriaLive="polite"
+              Icon="○"
+              ActionText="@ActionText"
+              ActionHref="@ActionHref"
+              OnAction="@OnAction" />
+
+@code {
+    [Parameter]
+    public string? Title { get; set; }
+
+    [Parameter]
+    public string? Description { get; set; }
+
+    [Parameter]
+    public string? ActionText { get; set; }
+
+    [Parameter]
+    public string? ActionHref { get; set; }
+
+    [Parameter]
+    public EventCallback OnAction { get; set; }
+}

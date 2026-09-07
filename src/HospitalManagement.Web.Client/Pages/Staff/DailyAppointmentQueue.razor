@@ -1,0 +1,340 @@
+@page "/staff/queue"
+@using Microsoft.AspNetCore.SignalR.Client
+@using HospitalManagement.Contracts.Realtime
+@implements IAsyncDisposable
+@inject ISchedulingApiClient SchedulingApi
+@inject UserSessionState SessionState
+@inject NavigationManager Navigation
+
+<PageTitle>Günlük Randevu ve Sıra Yönetimi — Hastane Yönetim Sistemi</PageTitle>
+
+<header class="page-heading" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: var(--hys-space-3);">
+    <div>
+        <span class="page-eyebrow">Hasta Kayıt ve Danışma</span>
+        <h1 class="page-title">Günlük Randevu ve Sıra Yönetimi</h1>
+        <p class="page-subtitle">Günün muayene randevularını listeleyin, hasta varışında check-in yaparak sıra numarası verin.</p>
+    </div>
+    <button class="ui-button ui-button--secondary" type="button" @onclick="LoadDailyQueueAsync">Yenile</button>
+</header>
+
+@if (_isLoading)
+{
+    <LoadingState />
+}
+else if (_isForbidden)
+{
+    <ForbiddenState ActionText="Genel Bakışa Dön" ActionHref="/" />
+}
+else
+{
+    <div style="display: flex; flex-direction: column; gap: var(--hys-space-5);">
+        @if (!string.IsNullOrWhiteSpace(_statusMessage))
+        {
+            <div class="ui-state ui-state--success" role="status" style="padding: var(--hys-space-3); border-radius: var(--hys-radius-md); background: #dcfce7; color: #166534;">
+                @_statusMessage
+            </div>
+        }
+
+        @if (!string.IsNullOrWhiteSpace(_errorMessage))
+        {
+            <div class="ui-state ui-state--danger" role="alert" style="padding: var(--hys-space-3); border-radius: var(--hys-radius-md); background: #fee2e2; color: #991b1b;">
+                @_errorMessage
+            </div>
+        }
+
+        <!-- Filtre Çubuğu -->
+        <section class="ui-panel" style="background: var(--hys-color-surface); border: 1px solid var(--hys-color-border); border-radius: var(--hys-radius-lg); padding: var(--hys-space-4);">
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: var(--hys-space-3); align-items: flex-end;">
+                <div>
+                    <label class="ui-label" for="filterDate">Tarih</label>
+                    <input id="filterDate" type="date" class="ui-input" @bind="_selectedDate" @bind:after="LoadDailyQueueAsync" />
+                </div>
+                <div>
+                    <label class="ui-label" for="filterDept">Poliklinik</label>
+                    <select id="filterDept" class="ui-input" @bind="_selectedDepartmentId" @bind:after="LoadDailyQueueAsync">
+                        <option value="">Tüm Poliklinikler</option>
+                        <option value="@_demoDepartmentId">Kardiyoloji Polikliniği</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="ui-label" for="filterDoc">Hekim</label>
+                    <select id="filterDoc" class="ui-input" @bind="_selectedDoctorId" @bind:after="LoadDailyQueueAsync">
+                        <option value="">Tüm Hekimler</option>
+                        <option value="@_demoDoctorId">Prof. Dr. Ayşe Yılmaz</option>
+                    </select>
+                </div>
+            </div>
+        </section>
+
+        <!-- Sıra ve Randevu Tablosu -->
+        @if (_appointments is null || _appointments.Count == 0)
+        {
+            <EmptyState Title="Randevu Bulunamadı" Description="Seçilen tarih ve filtre kriterlerine uygun randevu kaydı bulunmamaktadır." />
+        }
+        else
+        {
+            <div style="background: var(--hys-color-surface); border: 1px solid var(--hys-color-border); border-radius: var(--hys-radius-lg); overflow-x: auto;">
+                <table class="ui-table" style="width: 100%; border-collapse: collapse; text-align: left;">
+                    <thead>
+                        <tr style="border-bottom: 1px solid var(--hys-color-border); background: var(--hys-color-bg);">
+                            <th style="padding: var(--hys-space-3); width: 80px;">Sıra No</th>
+                            <th style="padding: var(--hys-space-3);">Saat</th>
+                            <th style="padding: var(--hys-space-3);">Hasta ID</th>
+                            <th style="padding: var(--hys-space-3);">Poliklinik / Hekim</th>
+                            <th style="padding: var(--hys-space-3);">Şikayet</th>
+                            <th style="padding: var(--hys-space-3);">Durum</th>
+                            <th style="padding: var(--hys-space-3); min-width: 180px;">İşlemler</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var appt in _appointments)
+                        {
+                            <tr style="border-bottom: 1px solid var(--hys-color-border);">
+                                <td style="padding: var(--hys-space-3); font-weight: 700; font-size: 1.125rem;">
+                                    @if (appt.QueueNumber.HasValue)
+                                    {
+                                        <span class="ui-badge ui-badge--primary" style="padding: 3px 8px; border-radius: var(--hys-radius-sm);">#@appt.QueueNumber.Value</span>
+                                    }
+                                    else
+                                    {
+                                        <span style="color: var(--hys-color-muted);">-</span>
+                                    }
+                                </td>
+                                <td style="padding: var(--hys-space-3); font-weight: 600;">
+                                    @appt.AppointmentTimeUtc.ToLocalTime().ToString("HH:mm")
+                                </td>
+                                <td style="padding: var(--hys-space-3);">
+                                    <code>@appt.PatientId.ToString().Substring(0, 8)...</code>
+                                </td>
+                                <td style="padding: var(--hys-space-3);">
+                                    Kardiyoloji<br />
+                                    <small style="color: var(--hys-color-muted);">Prof. Dr. Ayşe Yılmaz</small>
+                                </td>
+                                <td style="padding: var(--hys-space-3); max-width: 160px;">
+                                    @(string.IsNullOrWhiteSpace(appt.ReasonForVisit) ? "-" : appt.ReasonForVisit)
+                                </td>
+                                <td style="padding: var(--hys-space-3);">
+                                    <span class="ui-badge @GetStatusBadgeClass(appt.Status)" style="padding: 2px 8px; border-radius: var(--hys-radius-sm); font-size: 0.75rem; font-weight: 600;">
+                                        @GetStatusLabel(appt.Status)
+                                    </span>
+                                </td>
+                                <td style="padding: var(--hys-space-3);">
+                                    @if (appt.Status == "Confirmed")
+                                    {
+                                        <div style="display: flex; gap: var(--hys-space-2);">
+                                            <button class="ui-button ui-button--primary" type="button" style="padding: var(--hys-space-2) var(--hys-space-3); font-size: 0.8125rem;"
+                                                    disabled="@_isProcessing"
+                                                    @onclick="() => CheckInAsync(appt.Id)">
+                                                Giriş Yap
+                                            </button>
+                                            <button class="ui-button ui-button--secondary" type="button" style="padding: var(--hys-space-2) var(--hys-space-3); font-size: 0.8125rem;"
+                                                    disabled="@_isProcessing"
+                                                    @onclick="() => MarkNoShowAsync(appt.Id)">
+                                                Gelmedi
+                                            </button>
+                                        </div>
+                                    }
+                                    else if (appt.Status == "CheckedIn")
+                                    {
+                                        <span style="color: #16a34a; font-size: 0.875rem; font-weight: 500;">✓ Giriş Yapıldı (@(appt.CheckedInAtUtc?.ToLocalTime().ToString("HH:mm") ?? "-"))</span>
+                                    }
+                                    else if (appt.Status == "Completed")
+                                    {
+                                        <span style="color: var(--hys-color-muted); font-size: 0.875rem;">Tamamlandı</span>
+                                    }
+                                    else if (appt.Status == "NoShow")
+                                    {
+                                        <span style="color: #b45309; font-size: 0.875rem;">Gelmedi olarak işaretlendi</span>
+                                    }
+                                    else if (appt.Status == "Cancelled")
+                                    {
+                                        <span style="color: var(--hys-color-muted); font-size: 0.875rem;">İptal Edildi</span>
+                                    }
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </div>
+}
+
+@code {
+    private readonly Guid _demoDoctorId = Guid.Parse("00000000-0000-0000-0000-000000000102");
+    private readonly Guid _demoDepartmentId = Guid.Parse("30000000-0000-0000-0000-000000000003");
+
+    private DateOnly _selectedDate = DateOnly.FromDateTime(DateTime.UtcNow);
+    private string _selectedDoctorId = string.Empty;
+    private string _selectedDepartmentId = string.Empty;
+
+    private IReadOnlyList<AppointmentDetailResponse>? _appointments;
+    private bool _isLoading = true;
+    private bool _isForbidden;
+    private bool _isProcessing;
+    private string? _errorMessage;
+    private string? _statusMessage;
+    private HubConnection? _hubConnection;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await SessionState.EnsureLoadedAsync();
+        if (!SessionState.IsAuthenticated || SessionState.IsPatient)
+        {
+            Navigation.NavigateTo("account/login");
+            return;
+        }
+        await LoadDailyQueueAsync();
+        _ = StartRealtimeConnectionAsync();
+    }
+
+    private async Task StartRealtimeConnectionAsync()
+    {
+        try
+        {
+            _hubConnection = new HubConnectionBuilder()
+                .WithUrl(Navigation.ToAbsoluteUri("/hubs/hospital"))
+                .WithAutomaticReconnect()
+                .Build();
+
+            _hubConnection.On<QueueRealtimeUpdate>("QueueUpdated", async update =>
+            {
+                await LoadDailyQueueAsync();
+                await InvokeAsync(StateHasChanged);
+            });
+
+            _hubConnection.On<SlotRealtimeUpdate>("SlotStatusChanged", async update =>
+            {
+                await LoadDailyQueueAsync();
+                await InvokeAsync(StateHasChanged);
+            });
+
+            _hubConnection.Reconnected += async connectionId =>
+            {
+                await LoadDailyQueueAsync();
+                await InvokeAsync(StateHasChanged);
+            };
+
+            await _hubConnection.StartAsync();
+        }
+        catch
+        {
+            // Gracefully fallback to REST operations
+        }
+    }
+
+    private async Task LoadDailyQueueAsync()
+    {
+        _isLoading = true;
+        _errorMessage = null;
+        _isForbidden = false;
+
+        Guid? docId = Guid.TryParse(_selectedDoctorId, out var parsedDoc) ? parsedDoc : null;
+        Guid? deptId = Guid.TryParse(_selectedDepartmentId, out var parsedDept) ? parsedDept : null;
+
+        try
+        {
+            _appointments = await SchedulingApi.GetDailyAppointmentsAsync(_selectedDate, docId, deptId);
+            if (_appointments is null)
+            {
+                _isForbidden = true;
+            }
+        }
+        catch
+        {
+            _isForbidden = true;
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+    }
+
+    private async Task CheckInAsync(Guid appointmentId)
+    {
+        _isProcessing = true;
+        _errorMessage = null;
+        _statusMessage = null;
+
+        try
+        {
+            var result = await SchedulingApi.CheckInAppointmentAsync(appointmentId);
+            if (result is null)
+            {
+                _errorMessage = "Check-in işlemi gerçekleştirilemedi.";
+            }
+            else
+            {
+                _statusMessage = $"Hasta girişi yapıldı. Sıra Numarası: #{result.QueueNumber}";
+                await LoadDailyQueueAsync();
+            }
+        }
+        catch (Exception)
+        {
+            _errorMessage = "Check-in işlemi tamamlanamadı. Lütfen bağlantınızı kontrol edip yeniden deneyin.";
+        }
+        finally
+        {
+            _isProcessing = false;
+        }
+    }
+
+    private async Task MarkNoShowAsync(Guid appointmentId)
+    {
+        _isProcessing = true;
+        _errorMessage = null;
+        _statusMessage = null;
+
+        try
+        {
+            var result = await SchedulingApi.MarkNoShowAppointmentAsync(appointmentId);
+            if (result is null)
+            {
+                _errorMessage = "Gelmedi (No-Show) işlemi gerçekleştirilemedi.";
+            }
+            else
+            {
+                _statusMessage = "Randevu 'Gelmedi' olarak işaretlendi.";
+                await LoadDailyQueueAsync();
+            }
+        }
+        catch (Exception)
+        {
+            _errorMessage = "Gelmedi işlemi tamamlanamadı. Lütfen bağlantınızı kontrol edip yeniden deneyin.";
+        }
+        finally
+        {
+            _isProcessing = false;
+        }
+    }
+
+    private static string GetStatusLabel(string status) => status switch
+    {
+        "Draft" => "Taslak",
+        "Reserved" => "Ayrıldı",
+        "Confirmed" => "Onaylandı",
+        "CheckedIn" => "Giriş Yapıldı",
+        "Completed" => "Tamamlandı",
+        "Cancelled" => "İptal Edildi",
+        "NoShow" => "Gelmedi",
+        _ => status,
+    };
+
+    private static string GetStatusBadgeClass(string status) => status switch
+    {
+        "Confirmed" => "ui-badge--success",
+        "CheckedIn" => "ui-badge--primary",
+        "Completed" => "ui-badge--neutral",
+        "Cancelled" => "ui-badge--danger",
+        "NoShow" => "ui-badge--warning",
+        _ => "ui-badge--neutral",
+    };
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_hubConnection is not null)
+        {
+            await _hubConnection.DisposeAsync();
+        }
+    }
+}

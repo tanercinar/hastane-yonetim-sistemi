@@ -1,0 +1,517 @@
+@page "/surgery/perioperative/{BookingId:guid}"
+@using HospitalManagement.Contracts.Surgery
+@using HospitalManagement.Web.Client.Surgery
+@inject ISurgeryApiClient SurgeryApi
+@inject NavigationManager Nav
+
+<div class="container-fluid py-4">
+    <!-- Header -->
+    <div class="d-flex flex-wrap justify-content-between align-items-center mb-3 gap-2">
+        <div>
+            <nav aria-label="breadcrumb">
+                <ol class="breadcrumb mb-1">
+                    <li class="breadcrumb-item"><a href="surgery/scheduling" class="text-decoration-none">Ameliyat Planlama</a></li>
+                    <li class="breadcrumb-item active" aria-current="page">Perioperatif Kayıt</li>
+                </ol>
+            </nav>
+            <h2 class="fw-bold mb-0 text-dark">
+                <i class="bi bi-journal-medical text-primary me-2"></i>Perioperatif Ameliyat &amp; Anestezi Kaydı
+            </h2>
+        </div>
+        <div class="d-flex gap-2">
+            <button class="btn btn-outline-secondary" @onclick='() => Nav.NavigateTo("surgery/scheduling")'>
+                <i class="bi bi-arrow-left me-1"></i>Listeye Dön
+            </button>
+            @if (_record?.IsSigned == true)
+            {
+                <button class="btn btn-outline-warning" @onclick="() => _showCorrectionModal = true">
+                    <i class="bi bi-pencil-square me-1"></i>Düzeltme / Ek Not Ekle
+                </button>
+            }
+            else
+            {
+                <button class="btn btn-outline-primary" @onclick="SaveDraftAsync" disabled="@_isSubmitting">
+                    <i class="bi bi-save me-1"></i>Taslağı Kaydet
+                </button>
+                <button class="btn btn-success" @onclick="SignRecordAsync" disabled="@_isSubmitting">
+                    <i class="bi bi-lock-fill me-1"></i>İmzala &amp; Kilitle
+                </button>
+            }
+        </div>
+    </div>
+
+    <!-- Alert Messages -->
+    @if (!string.IsNullOrWhiteSpace(_errorMessage))
+    {
+        <div class="alert alert-danger alert-dismissible fade show" role="alert">
+            <i class="bi bi-exclamation-triangle-fill me-2"></i>@_errorMessage
+            <button type="button" class="btn-close" @onclick="() => _errorMessage = null"></button>
+        </div>
+    }
+    @if (!string.IsNullOrWhiteSpace(_successMessage))
+    {
+        <div class="alert alert-success alert-dismissible fade show" role="alert">
+            <i class="bi bi-check-circle-fill me-2"></i>@_successMessage
+            <button type="button" class="btn-close" @onclick="() => _successMessage = null"></button>
+        </div>
+    }
+
+    @if (_isLoading)
+    {
+        <div class="text-center py-5">
+            <div class="spinner-border text-primary" role="status"></div>
+            <p class="text-muted mt-2">Ameliyat ve perioperatif kayıt yükleniyor...</p>
+        </div>
+    }
+    else if (_booking == null)
+    {
+        <div class="alert alert-danger">Ameliyat randevusu bulunamadı.</div>
+    }
+    else
+    {
+        <!-- Booking & Patient Banner -->
+        <div class="card border-0 shadow-sm mb-4">
+            <div class="card-body p-3">
+                <div class="row align-items-center g-3">
+                    <div class="col-md-3">
+                        <span class="text-muted small d-block">Protokol / İşlem</span>
+                        <strong class="font-monospace text-primary">@_booking.BookingProtocolNumber</strong>
+                        <div class="fw-bold text-dark">@_booking.ProcedureName</div>
+                    </div>
+                    <div class="col-md-3">
+                        <span class="text-muted small d-block">Bölüm &amp; Aciliyet</span>
+                        <div>@_booking.DepartmentName</div>
+                        <span class="badge bg-light text-dark border">@_booking.Urgency</span>
+                    </div>
+                    <div class="col-md-3">
+                        <span class="text-muted small d-block">Cerrahi &amp; Anestezi Ekibi</span>
+                        <div class="small"><i class="bi bi-person-badge text-primary me-1"></i>Cerrah: @_booking.LeadSurgeonDoctorId.ToString().Substring(0, 8)...</div>
+                        <div class="small text-muted"><i class="bi bi-heart-pulse text-danger me-1"></i>Anestezi: @_booking.AnesthesiologistDoctorId.ToString().Substring(0, 8)...</div>
+                    </div>
+                    <div class="col-md-3 text-md-end">
+                        <span class="text-muted small d-block">Kayıt Durumu</span>
+                        @if (_record?.IsSigned == true)
+                        {
+                            <span class="badge bg-success py-2 px-3">
+                                <i class="bi bi-lock-fill me-1"></i>İmzalandı &amp; Kilitlendi
+                            </span>
+                            <div class="small text-muted mt-1">
+                                @_record.SignedAtUtc?.ToLocalTime().ToString("g")
+                            </div>
+                        }
+                        else
+                        {
+                            <span class="badge bg-warning text-dark py-2 px-3">
+                                <i class="bi bi-pencil-fill me-1"></i>Taslak Aşamasında
+                            </span>
+                        }
+                    </div>
+                </div>
+
+                @if (_booking.PreOpChecklist?.IsFullyCleared != true)
+                {
+                    <div class="alert alert-warning py-2 px-3 mt-3 mb-0 d-flex align-items-center gap-2">
+                        <i class="bi bi-exclamation-triangle-fill fs-5 text-warning-emphasis"></i>
+                        <div>
+                            <strong>Dikkat:</strong> Bu ameliyatın Pre-Op Güvenlik Kontrol Listesi henüz eksiksiz tamamlanmamıştır. İmzalama öncesinde tüm kontrollerin teyidi önerilir.
+                        </div>
+                    </div>
+                }
+            </div>
+        </div>
+
+        <!-- Perioperative Record Form -->
+        <div class="row g-4">
+            <!-- Left: Surgical Times & Anesthesia -->
+            <div class="col-lg-6">
+                <!-- Milestones Card -->
+                <div class="card border-0 shadow-sm mb-4">
+                    <div class="card-header bg-white py-3">
+                        <h5 class="fw-bold mb-0 text-dark">
+                            <i class="bi bi-stopwatch text-primary me-2"></i>1. Ameliyathane Zaman Milestoneları
+                        </h5>
+                    </div>
+                    <div class="card-body">
+                        <fieldset disabled="@(_record?.IsSigned == true)">
+                            <div class="row g-3">
+                                <div class="col-md-6">
+                                    <label class="form-label small fw-bold">1. Salona Giriş</label>
+                                    <input type="datetime-local" class="form-control form-control-sm" @bind="_roomEntryLocal" />
+                                </div>
+                                <div class="col-md-6">
+                                    <label class="form-label small fw-bold">2. Anestezi Başlangıç</label>
+                                    <input type="datetime-local" class="form-control form-control-sm" @bind="_anesthesiaStartLocal" />
+                                </div>
+                                <div class="col-md-6">
+                                    <label class="form-label small fw-bold">3. Cerrahi Kesi (İnsizyon)</label>
+                                    <input type="datetime-local" class="form-control form-control-sm" @bind="_incisionLocal" />
+                                </div>
+                                <div class="col-md-6">
+                                    <label class="form-label small fw-bold">4. Kapatma (Sütür Bitiş)</label>
+                                    <input type="datetime-local" class="form-control form-control-sm" @bind="_closureLocal" />
+                                </div>
+                                <div class="col-md-6">
+                                    <label class="form-label small fw-bold">5. Anestezi Bitiş (Uyandırma)</label>
+                                    <input type="datetime-local" class="form-control form-control-sm" @bind="_anesthesiaEndLocal" />
+                                </div>
+                                <div class="col-md-6">
+                                    <label class="form-label small fw-bold">6. Salondan Çıkış / PACU</label>
+                                    <input type="datetime-local" class="form-control form-control-sm" @bind="_roomExitLocal" />
+                                </div>
+                            </div>
+                        </fieldset>
+                    </div>
+                </div>
+
+                <!-- Anesthesia Details Card -->
+                <div class="card border-0 shadow-sm">
+                    <div class="card-header bg-white py-3">
+                        <h5 class="fw-bold mb-0 text-dark">
+                            <i class="bi bi-heart-pulse text-danger me-2"></i>2. Anestezi Simülasyonu &amp; Havayolu
+                        </h5>
+                    </div>
+                    <div class="card-body">
+                        <fieldset disabled="@(_record?.IsSigned == true)">
+                            <div class="mb-3">
+                                <label class="form-label small fw-bold">Uygulanan Anestezi Türü</label>
+                                <select class="form-select form-select-sm" @bind="_saveRequest.AnesthesiaType">
+                                    <option value="General">Genel Anestezi (Endotrakeal Entübasyon)</option>
+                                    <option value="RegionalSpinal">Rejyonel - Spinal Anestezi</option>
+                                    <option value="RegionalEpidural">Rejyonel - Epidural Anestezi</option>
+                                    <option value="LocalSedation">Lokal Anestezi &amp; Sedasyon</option>
+                                    <option value="MAC">Monitörize Anestezi Bakımı (MAC)</option>
+                                </select>
+                            </div>
+                            <div class="mb-0">
+                                <label class="form-label small fw-bold">Anestezi Seyir Notları &amp; İlaç Uygulamaları</label>
+                                <textarea class="form-control form-control-sm" rows="4" @bind="_saveRequest.AnesthesiaNotes" placeholder="Propofol indüksiyonu, sevofluran idamesi, hemodinami stabil..."></textarea>
+                            </div>
+                        </fieldset>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Right: Surgical Details & Post-Op -->
+            <div class="col-lg-6">
+                <!-- Surgical Findings Card -->
+                <div class="card border-0 shadow-sm mb-4">
+                    <div class="card-header bg-white py-3">
+                        <h5 class="fw-bold mb-0 text-dark">
+                            <i class="bi bi-file-earmark-medical text-success me-2"></i>3. İntraoperatif Cerrahi Bulgular &amp; Güvenlik
+                        </h5>
+                    </div>
+                    <div class="card-body">
+                        <fieldset disabled="@(_record?.IsSigned == true)">
+                            <div class="mb-3">
+                                <label class="form-label small fw-bold">İntraoperatif Bulgular &amp; Cerrahi Prosedür Notu</label>
+                                <textarea class="form-control form-control-sm" rows="3" @bind="_saveRequest.IntraoperativeFindings" placeholder="Göbek altı insizyonla batına girildi, safra kesesi hidropik görünümdeydi..."></textarea>
+                            </div>
+                            <div class="row g-2 mb-3">
+                                <div class="col-md-6">
+                                    <label class="form-label small fw-bold">Tahmini Kan Kaybı (mL)</label>
+                                    <input type="number" class="form-control form-control-sm" @bind="_saveRequest.EstimatedBloodLossMl" placeholder="Örn: 50" />
+                                </div>
+                                <div class="col-md-6">
+                                    <label class="form-label small fw-bold">Patoloji / Biyopsi Numuneleri</label>
+                                    <input type="text" class="form-control form-control-sm" @bind="_saveRequest.SpecimensCollected" placeholder="Kolesistektomi materyali" />
+                                </div>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label small fw-bold">Gelişen Komplikasyonlar (varsa)</label>
+                                <input type="text" class="form-control form-control-sm" @bind="_saveRequest.IntraoperativeComplications" placeholder="Komplikasyon gelişmedi." />
+                            </div>
+                            <div class="form-check form-switch p-2 bg-light rounded border">
+                                <input class="form-check-input ms-0 me-2" type="checkbox" id="chkCounts" @bind="_saveRequest.CountsConfirmed">
+                                <label class="form-check-label fw-bold text-dark" for="chkCounts">
+                                    <i class="bi bi-shield-check text-success me-1"></i>Gazlı Bez, İğne &amp; Cerrahi Alet Sayımı Eksiksiz Teyit Edildi
+                                </label>
+                            </div>
+                        </fieldset>
+                    </div>
+                </div>
+
+                <!-- Post-Op Disposition Card -->
+                <div class="card border-0 shadow-sm mb-4">
+                    <div class="card-header bg-white py-3">
+                        <h5 class="fw-bold mb-0 text-dark">
+                            <i class="bi bi-door-open text-warning me-2"></i>4. Post-Op Sevk &amp; Bakım Talimatı
+                        </h5>
+                    </div>
+                    <div class="card-body">
+                        <fieldset disabled="@(_record?.IsSigned == true)">
+                            <div class="mb-3">
+                                <label class="form-label small fw-bold">Post-Op Sevk Edilen Alan (Disposition)</label>
+                                <select class="form-select form-select-sm" @bind="_saveRequest.PostOpDisposition">
+                                    <option value="PACU">Ayılma Ünitesi (PACU / Derlenme)</option>
+                                    <option value="SurgicalWard">Cerrahi Yataklı Servis</option>
+                                    <option value="ICU">Yoğun Bakım Ünitesi (ICU)</option>
+                                    <option value="DirectDischarge">Günübirlik Taburculuk</option>
+                                </select>
+                            </div>
+                            <div class="mb-0">
+                                <label class="form-label small fw-bold">Post-Op Takip ve Hemşirelik Talimatları</label>
+                                <textarea class="form-control form-control-sm" rows="3" @bind="_saveRequest.PostOpInstructions" placeholder="Vital bulgu takibi 15 dakikada bir, 6 saat oral stop, analjezi protokolü..."></textarea>
+                            </div>
+                        </fieldset>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Corrections / Addendum History Section -->
+        @if (_record?.Corrections?.Count > 0)
+        {
+            <div class="card border-0 shadow-sm mt-4">
+                <div class="card-header bg-warning-subtle py-3">
+                    <h5 class="fw-bold mb-0 text-warning-emphasis">
+                        <i class="bi bi-clock-history me-2"></i>Düzeltme &amp; Ek Not Geçmişi (Audit Trail)
+                    </h5>
+                </div>
+                <div class="card-body p-0">
+                    <ul class="list-group list-group-flush">
+                        @foreach (var corr in _record.Corrections.OrderByDescending(c => c.CorrectedAtUtc))
+                        {
+                            <li class="list-group-item p-3">
+                                <div class="d-flex justify-content-between align-items-center mb-1">
+                                    <span class="badge bg-warning text-dark">
+                                        <i class="bi bi-pen me-1"></i>Gerekçe: @corr.ReasonForCorrection
+                                    </span>
+                                    <small class="text-muted">
+                                        <i class="bi bi-clock me-1"></i>@corr.CorrectedAtUtc.ToLocalTime().ToString("g")
+                                    </small>
+                                </div>
+                                <p class="mb-1 text-dark">@corr.CorrectionNote</p>
+                                <small class="text-muted">Düzeltme Yapan Hekim ID: @corr.CorrectedByDoctorId</small>
+                            </li>
+                        }
+                    </ul>
+                </div>
+            </div>
+        }
+    }
+</div>
+
+<!-- Modal: Düzeltme / Ek Not Ekle -->
+@if (_showCorrectionModal)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content border-0 shadow">
+                <div class="modal-header bg-warning text-dark">
+                    <h5 class="modal-title"><i class="bi bi-pencil-square me-2"></i>İmzalı Kayda Düzeltme / Ek Not Ekle</h5>
+                    <button type="button" class="btn-close" @onclick="() => _showCorrectionModal = false"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="alert alert-info small py-2">
+                        İmzalanmış perioperatif kayıtlar değiştirilemez. Yapacağınız ekleme düzeltme geçmişine kalıcı olarak kaydedilecektir.
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">Düzeltme Gerekçesi <span class="text-danger">*</span></label>
+                        <input type="text" class="form-control" @bind="_correctionRequest.ReasonForCorrection" placeholder="Örn: Kan kaybı miktarı revizyonu / Patoloji numune no eki" />
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">Düzeltme / Ek Not <span class="text-danger">*</span></label>
+                        <textarea class="form-control" rows="4" @bind="_correctionRequest.CorrectionNote" placeholder="Ayrıntılı açıklama..."></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer bg-light">
+                    <button type="button" class="btn btn-secondary" @onclick="() => _showCorrectionModal = false">Vazgeç</button>
+                    <button type="button" class="btn btn-warning" @onclick="SubmitCorrectionAsync" disabled="@_isSubmitting">
+                        @if (_isSubmitting)
+                        {
+                            <span class="spinner-border spinner-border-sm me-1"></span>
+                        }
+                        Düzeltmeyi Kaydet
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter]
+    public Guid BookingId { get; set; }
+
+    private bool _isLoading = true;
+    private bool _isSubmitting;
+    private string? _errorMessage;
+    private string? _successMessage;
+
+    private SurgeryBookingResponse? _booking;
+    private PerioperativeRecordResponse? _record;
+
+    private SavePerioperativeRecordRequest _saveRequest = new();
+    private DateTime? _roomEntryLocal;
+    private DateTime? _anesthesiaStartLocal;
+    private DateTime? _incisionLocal;
+    private DateTime? _closureLocal;
+    private DateTime? _anesthesiaEndLocal;
+    private DateTime? _roomExitLocal;
+
+    private bool _showCorrectionModal;
+    private AddPerioperativeCorrectionRequest _correctionRequest = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadDataAsync();
+    }
+
+    private async Task LoadDataAsync()
+    {
+        _isLoading = true;
+        _errorMessage = null;
+        try
+        {
+            _booking = await SurgeryApi.GetBookingByIdAsync(BookingId);
+            if (_booking != null)
+            {
+                _record = await SurgeryApi.GetPerioperativeRecordByBookingIdAsync(BookingId);
+                if (_record != null)
+                {
+                    _saveRequest = new SavePerioperativeRecordRequest(
+                        _record.SurgeryBookingId,
+                        _record.RoomEntryTimeUtc,
+                        _record.AnesthesiaStartTimeUtc,
+                        _record.IncisionTimeUtc,
+                        _record.ClosureTimeUtc,
+                        _record.AnesthesiaEndTimeUtc,
+                        _record.RoomExitTimeUtc,
+                        _record.AnesthesiaType,
+                        _record.AnesthesiaNotes,
+                        _record.IntraoperativeFindings,
+                        _record.IntraoperativeComplications,
+                        _record.EstimatedBloodLossMl,
+                        _record.SpecimensCollected,
+                        _record.CountsConfirmed,
+                        _record.PostOpDisposition,
+                        _record.PostOpInstructions);
+
+                    _roomEntryLocal = _record.RoomEntryTimeUtc?.ToLocalTime();
+                    _anesthesiaStartLocal = _record.AnesthesiaStartTimeUtc?.ToLocalTime();
+                    _incisionLocal = _record.IncisionTimeUtc?.ToLocalTime();
+                    _closureLocal = _record.ClosureTimeUtc?.ToLocalTime();
+                    _anesthesiaEndLocal = _record.AnesthesiaEndTimeUtc?.ToLocalTime();
+                    _roomExitLocal = _record.RoomExitTimeUtc?.ToLocalTime();
+                }
+                else
+                {
+                    _saveRequest = new SavePerioperativeRecordRequest
+                    {
+                        SurgeryBookingId = _booking.Id,
+                        AnesthesiaType = "General",
+                        PostOpDisposition = "PACU",
+                        CountsConfirmed = true,
+                    };
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"Veriler yüklenirken hata: {ex.Message}";
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+    }
+
+    private async Task SaveDraftAsync()
+    {
+        _isSubmitting = true;
+        _errorMessage = null;
+        try
+        {
+            _saveRequest.RoomEntryTimeUtc = _roomEntryLocal?.ToUniversalTime();
+            _saveRequest.AnesthesiaStartTimeUtc = _anesthesiaStartLocal?.ToUniversalTime();
+            _saveRequest.IncisionTimeUtc = _incisionLocal?.ToUniversalTime();
+            _saveRequest.ClosureTimeUtc = _closureLocal?.ToUniversalTime();
+            _saveRequest.AnesthesiaEndTimeUtc = _anesthesiaEndLocal?.ToUniversalTime();
+            _saveRequest.RoomExitTimeUtc = _roomExitLocal?.ToUniversalTime();
+
+            var res = await SurgeryApi.SavePerioperativeRecordAsync(_saveRequest);
+            if (res != null)
+            {
+                _record = res;
+                _successMessage = "Perioperatif kayıt taslağı başarıyla kaydedildi.";
+            }
+            else
+            {
+                _errorMessage = "Kayıt kaydedilemedi. Zaman sıralamasını (Giriş <= Anestezi <= İnsizyon <= Kapatma <= Bitiş <= Çıkış) kontrol ediniz.";
+            }
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"Kaydetme hatası: {ex.Message}";
+        }
+        finally
+        {
+            _isSubmitting = false;
+        }
+    }
+
+    private async Task SignRecordAsync()
+    {
+        if (_record == null)
+        {
+            await SaveDraftAsync();
+            if (_record == null) return;
+        }
+
+        _isSubmitting = true;
+        _errorMessage = null;
+        try
+        {
+            var res = await SurgeryApi.SignPerioperativeRecordAsync(_record.Id);
+            if (res != null)
+            {
+                _record = res;
+                _successMessage = "Perioperatif kayıt başarıyla imzalandı ve kilitlendi.";
+                await LoadDataAsync();
+            }
+            else
+            {
+                _errorMessage = "İmzalama başarısız.";
+            }
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"İmzalama hatası: {ex.Message}";
+        }
+        finally
+        {
+            _isSubmitting = false;
+        }
+    }
+
+    private async Task SubmitCorrectionAsync()
+    {
+        if (_record == null) return;
+
+        _isSubmitting = true;
+        _errorMessage = null;
+        try
+        {
+            var res = await SurgeryApi.AddPerioperativeCorrectionAsync(_record.Id, _correctionRequest);
+            if (res != null)
+            {
+                _successMessage = "Düzeltme notu başarıyla eklendi.";
+                _showCorrectionModal = false;
+                _correctionRequest = new();
+                await LoadDataAsync();
+            }
+            else
+            {
+                _errorMessage = "Düzeltme kaydedilemedi.";
+            }
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"Düzeltme hatası: {ex.Message}";
+        }
+        finally
+        {
+            _isSubmitting = false;
+        }
+    }
+}
