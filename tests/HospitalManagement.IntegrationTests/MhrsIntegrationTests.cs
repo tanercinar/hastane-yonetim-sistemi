@@ -174,7 +174,10 @@ public sealed class MhrsIntegrationTests
         Assert.Equal("Hasta gelemeyeceğini bildirdi", cancelled.CancellationReason);
 
         // 2. Query Patient Appointments
-        var patResp = await doctorClient.GetAsync("/api/v1/interoperability/mhrs/patients/33333333330/appointments");
+        var patResp = await PostWithAntiforgeryAsync(
+            doctorClient,
+            "/api/v1/interoperability/mhrs/patient-appointments/search",
+            new MhrsPatientAppointmentsQueryRequest { PatientNationalId = "33333333330" });
         Assert.Equal(HttpStatusCode.OK, patResp.StatusCode);
         var patList = await patResp.Content.ReadFromJsonAsync<List<MhrsAppointmentResponse>>();
         Assert.NotNull(patList);

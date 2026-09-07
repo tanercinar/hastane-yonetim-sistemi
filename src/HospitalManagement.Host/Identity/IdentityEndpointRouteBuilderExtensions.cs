@@ -338,13 +338,13 @@ public static class IdentityEndpointRouteBuilderExtensions
     }
 
     private static async Task<IResult> GetUsersAsync(
-        string? query,
-        string? role,
-        bool? isEnabled,
-        int page,
-        int pageSize,
         IIdentityLifecycleService service,
-        CancellationToken cancellationToken)
+        string? query = null,
+        string? role = null,
+        bool? isEnabled = null,
+        int page = 1,
+        int pageSize = 50,
+        CancellationToken cancellationToken = default)
     {
         var effectivePage = page <= 0 ? 1 : page;
         var effectivePageSize = pageSize <= 0 ? 50 : pageSize;
@@ -423,4 +423,3 @@ public static class IdentityEndpointRouteBuilderExtensions
             _ => throw new ArgumentOutOfRangeException(nameof(result)),
         };
 }
-

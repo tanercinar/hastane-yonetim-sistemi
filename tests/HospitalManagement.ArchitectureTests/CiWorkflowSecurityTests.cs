@@ -51,7 +51,9 @@ public sealed class CiWorkflowSecurityTests
         Assert.Contains("dotnet build HospitalManagement.slnx", workflow, StringComparison.Ordinal);
         Assert.Contains("test-dependency-vulnerabilities.ps1", workflow, StringComparison.Ordinal);
         Assert.Contains("playwright.ps1 install --with-deps chromium", workflow, StringComparison.Ordinal);
-        Assert.Contains("dotnet test HospitalManagement.slnx", workflow, StringComparison.Ordinal);
+        Assert.Contains("HospitalManagement.IntegrationTests.csproj", workflow, StringComparison.Ordinal);
+        Assert.Contains("HospitalManagement.EndToEndTests.csproj", workflow, StringComparison.Ordinal);
+        Assert.Contains("Browser end-to-end tests", workflow, StringComparison.Ordinal);
         Assert.Contains("XPlat Code Coverage", workflow, StringComparison.Ordinal);
         Assert.Contains("Upload test and coverage reports", workflow, StringComparison.Ordinal);
     }

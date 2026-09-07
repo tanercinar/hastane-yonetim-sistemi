@@ -52,7 +52,7 @@ stateDiagram-v2
 | `GET` | `/api/v1/interoperability/mhrs/slots` | Hekim, poliklinik ve tarihe göre uygun MHRS randevu slotlarını listeler |
 | `POST` | `/api/v1/interoperability/mhrs/appointments` | Yeni bir MHRS randevusu oluşturur (idempotency anahtarı ile) |
 | `POST` | `/api/v1/interoperability/mhrs/appointments/{mhrsAppointmentId}/cancel` | Mevcut bir MHRS randevusunu iptal eder |
-| `GET` | `/api/v1/interoperability/mhrs/patients/{patientNationalId}/appointments` | Hastaya ait tüm MHRS randevularını listeler |
+| `POST` | `/api/v1/interoperability/mhrs/patient-appointments/search` | Kimlik numarasını URL ve erişim loglarına taşımadan, antiforgery korumalı gövdeden hastanın MHRS randevularını listeler |
 | `POST` | `/api/v1/interoperability/mhrs/sync` | Yerel randevu takvimi ile MHRS randevularını senkronize eder |
 
 ---

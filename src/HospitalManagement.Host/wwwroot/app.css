@@ -162,7 +162,9 @@ a {
 .shell-workspace {
     display: grid;
     grid-template-rows: auto 1fr auto;
+    max-width: 100%;
     min-width: 0;
+    overflow-x: hidden;
 }
 
 .shell-topbar {
@@ -195,6 +197,8 @@ a {
 .shell-main {
     margin: 0 auto;
     max-width: 90rem;
+    min-width: 0;
+    overflow-x: auto;
     padding: clamp(var(--hys-space-6), 4vw, var(--hys-space-12));
     width: 100%;
 }

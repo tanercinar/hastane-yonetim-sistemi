@@ -55,14 +55,31 @@ jobs:
         run: ./tests/HospitalManagement.EndToEndTests/bin/Release/net10.0/playwright.ps1 install --with-deps chromium
 
       - name: Test with coverage
+        shell: pwsh
+        run: |
+          $projects = @(
+            "tests/HospitalManagement.ArchitectureTests/HospitalManagement.ArchitectureTests.csproj",
+            "tests/HospitalManagement.ComponentTests/HospitalManagement.ComponentTests.csproj",
+            "tests/HospitalManagement.IntegrationTests/HospitalManagement.IntegrationTests.csproj",
+            "tests/HospitalManagement.UnitTests/HospitalManagement.UnitTests.csproj"
+          )
+          foreach ($project in $projects) {
+            dotnet test $project `
+              --configuration Release `
+              --no-build `
+              --no-restore `
+              --collect:"XPlat Code Coverage" `
+              --results-directory ./artifacts/test-results
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+
+      - name: Browser end-to-end tests
         run: >-
-          dotnet test HospitalManagement.slnx
+          dotnet test tests/HospitalManagement.EndToEndTests/HospitalManagement.EndToEndTests.csproj
           --configuration Release
           --no-build
           --no-restore
-          --collect:"XPlat Code Coverage"
           --results-directory ./artifacts/test-results
-          -m:1
 
       - name: Upload test and coverage reports
         if: ${{ always() }}
