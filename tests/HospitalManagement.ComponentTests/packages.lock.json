@@ -470,7 +470,8 @@
           "HospitalManagement.UI": "[1.0.0, )",
           "Microsoft.AspNetCore.Components.WebAssembly": "[10.0.5, )",
           "Microsoft.AspNetCore.SignalR.Client": "[10.0.5, )",
-          "Microsoft.Extensions.Localization": "[10.0.11, )"
+          "Microsoft.Extensions.Localization": "[10.0.11, )",
+          "Microsoft.NET.Sdk.WebAssembly.Pack": "[10.0.11, )"
         }
       },
       "Microsoft.AspNetCore.Components.Web": {
@@ -520,6 +521,12 @@
           "Microsoft.Extensions.Logging.Abstractions": "10.0.11",
           "Microsoft.Extensions.Options": "10.0.11"
         }
+      },
+      "Microsoft.NET.Sdk.WebAssembly.Pack": {
+        "type": "CentralTransitive",
+        "requested": "[10.0.11, )",
+        "resolved": "10.0.11",
+        "contentHash": "qTQsflEOjG1xG8FCfQJZbVd7DErJdKqKoW4gxH1HlgGQ5IBBloehLvXhMhzYqogYyajU7YEUKZvJ4n/vA7sAmQ=="
       }
     }
   }
