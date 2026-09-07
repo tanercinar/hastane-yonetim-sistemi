@@ -670,7 +670,10 @@ public static class ReportingEndpointRouteBuilderExtensions
                 return Results.Forbid();
             }
 
-            request = request with { DepartmentId = effectiveDepartmentId };
+            request = request with
+            {
+                DepartmentId = effectiveDepartmentId
+            };
         }
 
         try

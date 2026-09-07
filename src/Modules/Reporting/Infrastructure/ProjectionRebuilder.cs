@@ -1,8 +1,8 @@
+using System.Text.Json;
 using HospitalManagement.Modules.Reporting.Application;
 using HospitalManagement.Modules.Reporting.Domain;
 using HospitalManagement.Modules.Reporting.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
-using System.Text.Json;
 
 namespace HospitalManagement.Modules.Reporting.Infrastructure;
 

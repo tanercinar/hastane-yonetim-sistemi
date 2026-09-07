@@ -33,10 +33,19 @@ public sealed class ProjectionSourceEvent
         OccurredAtUtc = occurredAtUtc;
     }
 
-    public long Position { get; private set; }
-    public Guid EventId { get; private set; }
+    public long Position
+    {
+        get; private set;
+    }
+    public Guid EventId
+    {
+        get; private set;
+    }
     public string ProjectionName { get; private set; } = string.Empty;
     public string EventType { get; private set; } = string.Empty;
     public string PayloadJson { get; private set; } = string.Empty;
-    public DateTime OccurredAtUtc { get; private set; }
+    public DateTime OccurredAtUtc
+    {
+        get; private set;
+    }
 }

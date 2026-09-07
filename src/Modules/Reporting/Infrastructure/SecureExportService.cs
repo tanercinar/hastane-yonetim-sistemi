@@ -1,10 +1,10 @@
 using System.Globalization;
 using System.Text;
 using HospitalManagement.BuildingBlocks.Audit;
+using HospitalManagement.BuildingBlocks.Authorization;
 using HospitalManagement.Modules.Reporting.Application;
 using HospitalManagement.Modules.Reporting.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
-using HospitalManagement.BuildingBlocks.Authorization;
 
 namespace HospitalManagement.Modules.Reporting.Infrastructure;
 
